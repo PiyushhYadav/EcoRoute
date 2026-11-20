@@ -246,7 +246,7 @@ export default function DispatchPage() {
   useEffect(() => {
     if (isRunAll || !isPlaying || selectedPickupId === 'ALL') return;
 
-    const intervalTime = Math.max(Math.round(650 / playbackSpeed), Math.floor(1000 / playbackSpeed));
+    const intervalTime = Math.max(Math.round(680 / playbackSpeed), Math.floor(1000 / playbackSpeed));
     const timer = setInterval(() => {
       setCurrentStepIndex((prev) => {
         if (prev >= currentSteps.length - 1) {
@@ -299,8 +299,8 @@ export default function DispatchPage() {
       return;
     }
 
-    // Play through intermediate steps of this pickup (>= 650ms / playbackSpeed)
-    const stepInterval = Math.max(Math.round(650 / playbackSpeed), Math.floor(1000 / playbackSpeed));
+    // Play through intermediate steps of this pickup (>= 680ms / playbackSpeed)
+    const stepInterval = Math.max(Math.round(680 / playbackSpeed), Math.floor(1000 / playbackSpeed));
     const timer = setTimeout(() => {
       setCurrentStepIndex((prev) => prev + 1);
     }, stepInterval);

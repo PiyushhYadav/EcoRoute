@@ -63,6 +63,117 @@ export function formatCost(val, unit = '') {
   return unit ? `${formatted}${unit}` : formatted;
 }
 
+/**
+ * Straight Graph Edge Segment Generator
+ * Pure helper returning the exact straight 2-point segment [u, v].
+ */
+export function getEdgePolyline(edge, uNode, vNode) {
+  if (!uNode || !vNode || uNode.lng == null || uNode.lat == null || vNode.lng == null || vNode.lat == null) {
+    return [];
+  }
+  return [
+    [Number(uNode.lng), Number(uNode.lat)],
+    [Number(vNode.lng), Number(vNode.lat)],
+  ];
+}
+
+/**
+ * Arc-Length Slicer for Buttery-Smooth Steering
+ * Measures cumulative aspect-corrected segment lengths (dx * cos(lat), dy).
+ */
+export function slicePolylineByProgress(coords, progress) {
+  if (!coords || coords.length === 0) {
+    return { partialCoords: [], tipCoord: [0, 0], angleDeg: 0 };
+  }
+  if (coords.length === 1) {
+    return { partialCoords: [coords[0], coords[0]], tipCoord: coords[0], angleDeg: 0 };
+  }
+
+  // Measure cumulative aspect-corrected segment lengths
+  const segLengths = [];
+  const cumLengths = [0];
+  let totalLength = 0;
+
+  for (let i = 0; i < coords.length - 1; i++) {
+    const p1 = coords[i];
+    const p2 = coords[i + 1];
+    const midLatRad = ((p1[1] + p2[1]) / 2) * (Math.PI / 180);
+    const dx = (p2[0] - p1[0]) * Math.cos(midLatRad);
+    const dy = p2[1] - p1[1];
+    const d = Math.hypot(dx, dy);
+    segLengths.push(d);
+    totalLength += d;
+    cumLengths.push(totalLength);
+  }
+
+  const p0 = coords[0];
+  const p1 = coords[1];
+  const initialLatRad = ((p0[1] + p1[1]) / 2) * (Math.PI / 180);
+  const initialAngle = -Math.atan2(p1[1] - p0[1], (p1[0] - p0[0]) * Math.cos(initialLatRad)) * (180 / Math.PI);
+
+  if (totalLength < 1e-9) {
+    return { partialCoords: [coords[0], coords[0]], tipCoord: coords[0], angleDeg: initialAngle };
+  }
+
+  const clampedProgress = Math.max(0, Math.min(1, progress));
+
+  if (clampedProgress <= 0) {
+    return {
+      partialCoords: [coords[0], coords[0]],
+      tipCoord: coords[0],
+      angleDeg: initialAngle,
+    };
+  }
+
+  if (clampedProgress >= 1) {
+    const pPrev = coords[coords.length - 2];
+    const pNext = coords[coords.length - 1];
+    const finalLatRad = ((pPrev[1] + pNext[1]) / 2) * (Math.PI / 180);
+    const finalAngle = -Math.atan2(pNext[1] - pPrev[1], (pNext[0] - pPrev[0]) * Math.cos(finalLatRad)) * (180 / Math.PI);
+    return {
+      partialCoords: coords.slice(),
+      tipCoord: pNext,
+      angleDeg: finalAngle,
+    };
+  }
+
+  const targetDist = clampedProgress * totalLength;
+
+  let segIdx = 0;
+  for (let i = 0; i < segLengths.length; i++) {
+    if (targetDist <= cumLengths[i + 1] || i === segLengths.length - 1) {
+      segIdx = i;
+      break;
+    }
+  }
+
+  const segDist = segLengths[segIdx];
+  const distIntoSeg = targetDist - cumLengths[segIdx];
+  const t = segDist > 0 ? Math.max(0, Math.min(1, distIntoSeg / segDist)) : 0;
+
+  const pPrev = coords[segIdx];
+  const pNext = coords[segIdx + 1];
+
+  const curLng = pPrev[0] + (pNext[0] - pPrev[0]) * t;
+  const curLat = pPrev[1] + (pNext[1] - pPrev[1]) * t;
+  const tipCoord = [curLng, curLat];
+
+  const midLatRad = ((pPrev[1] + pNext[1]) / 2) * (Math.PI / 180);
+  const angleDeg = -Math.atan2(pNext[1] - pPrev[1], (pNext[0] - pPrev[0]) * Math.cos(midLatRad)) * (180 / Math.PI);
+
+  const partialCoords = coords.slice(0, segIdx + 1);
+  partialCoords.push(tipCoord);
+  if (partialCoords.length < 2) {
+    partialCoords.push(tipCoord);
+  }
+
+  return {
+    partialCoords,
+    tipCoord,
+    angleDeg,
+  };
+}
+
 const DEFAULT_CENTER = [77.16, 28.61];
 const DEFAULT_ZOOM = 10.7;
 
@@ -769,10 +880,10 @@ export default function MapCanvas({
           'line-join': 'round',
         },
         paint: {
-          'line-color': '#94A3B8',
-          'line-width': 2.0,
-          'line-dasharray': [2, 2],
-          'line-opacity': 0.7,
+          'line-color': '#64748B',
+          'line-width': 2.2,
+          'line-dasharray': [1.4, 2.0],
+          'line-opacity': 0.8,
         },
       });
     }
@@ -795,7 +906,7 @@ export default function MapCanvas({
         },
         paint: {
           'line-color': '#0F172A',
-          'line-width': 3.0,
+          'line-width': 3.2,
         },
       });
     }
@@ -842,7 +953,7 @@ export default function MapCanvas({
         },
         paint: {
           'line-color': '#0F172A',
-          'line-width': 3.6,
+          'line-width': 3.8,
         },
       });
     }
@@ -865,7 +976,7 @@ export default function MapCanvas({
         },
         paint: {
           'line-color': '#FFFFFF',
-          'line-width': 7.0,
+          'line-width': 6.8,
         },
       });
     }
@@ -948,6 +1059,8 @@ export default function MapCanvas({
           return;
         }
 
+        const polylineCoords = getEdgePolyline(edge, u, v);
+
         const feature = {
           type: 'Feature',
           properties: {
@@ -961,10 +1074,7 @@ export default function MapCanvas({
           },
           geometry: {
             type: 'LineString',
-            coordinates: [
-              [Number(u.lng), Number(u.lat)],
-              [Number(v.lng), Number(v.lat)],
-            ],
+            coordinates: polylineCoords,
           },
         };
 
@@ -1682,16 +1792,16 @@ export default function MapCanvas({
     if (!snakeArrowMarkerRef.current) {
       const arrowEl = document.createElement('div');
       arrowEl.className = 'snake-arrow-marker';
-      arrowEl.style.width = '14px';
-      arrowEl.style.height = '14px';
+      arrowEl.style.width = '15px';
+      arrowEl.style.height = '15px';
       arrowEl.style.pointerEvents = 'none';
       arrowEl.style.transition = 'none !important';
       arrowEl.style.display = 'none';
       arrowEl.style.zIndex = '12';
       arrowEl.innerHTML = `
-        <div id="snake-arrow-inner" style="width: 14px; height: 14px; transform-origin: center; transition: none !important; display: flex; align-items: center; justify-content: center;">
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" style="display: block; overflow: visible;">
-            <path d="M 1.5 2 L 12.5 7 L 1.5 12 L 4.5 7 Z" fill="#0F172A" stroke="#FFFFFF" stroke-width="1.2" stroke-linejoin="round" />
+        <div id="snake-arrow-inner" style="width: 15px; height: 15px; transform-origin: center; transition: none !important; display: flex; align-items: center; justify-content: center; pointer-events: none;">
+          <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg" style="display: block; overflow: visible; pointer-events: none; filter: drop-shadow(0 0 1px #FFFFFF);">
+            <path d="M 1.5 2.5 L 13.5 7.5 L 1.5 12.5 L 4.8 7.5 Z" fill="#0F172A" stroke="#FFFFFF" stroke-width="1.2" stroke-linejoin="round" />
           </svg>
         </div>
       `;
@@ -1729,46 +1839,42 @@ export default function MapCanvas({
       return;
     }
 
-    const uLng = Number(u.lng);
-    const uLat = Number(u.lat);
-    const vLng = Number(v.lng);
-    const vLat = Number(v.lat);
-    const p1 = [uLng, uLat];
-    const p2 = [vLng, vLat];
+    const activeEdge = edgesRef.current.find(
+      (e) => (e.source_id === step.from_node && e.target_id === step.to_node) ||
+             (e.source_id === step.to_node && e.target_id === step.from_node)
+    );
+    const orientedCoords = getEdgePolyline(activeEdge || { id: `${step.from_node}->${step.to_node}` }, u, v);
+    if (!orientedCoords || orientedCoords.length < 2) {
+      clearTraversing();
+      return;
+    }
 
     const toNodeId = step.to_node;
-    const activeEdgeId = step.active_edge_id || `${step.from_node}->${step.to_node}`;
+    const activeEdgeId = step.active_edge_id || activeEdge?.id || `${step.from_node}->${step.to_node}`;
     animatingEdgeIdRef.current = activeEdgeId;
 
     // Prevent Instant Snapping: EXCLUDE (u -> v) from static sources while animating
     updateAllEdgeSources(map, edgesRef.current, nodesRef.current, activeEdgeId);
 
-    // Exact bearing angle calculation for +X pointing SVG arrowhead:
-    const midLatRad = ((uLat + vLat) / 2) * (Math.PI / 180);
-    const dLngScaled = (vLng - uLng) * Math.cos(midLatRad);
-    const dLat = vLat - uLat;
-    const angleDeg = -Math.atan2(dLat, dLngScaled) * (180 / Math.PI);
-
+    const initialSlice = slicePolylineByProgress(orientedCoords, 0);
     if (arrowInner) {
-      arrowInner.style.transform = `rotate(${angleDeg}deg)`;
+      arrowInner.style.transform = `rotate(${initialSlice.angleDeg}deg)`;
     }
     if (arrowEl) {
       arrowEl.style.display = 'block';
     }
-    snakeArrowMarkerRef.current.setLngLat(p1);
+    snakeArrowMarkerRef.current.setLngLat(initialSlice.tipCoord);
 
     const speed = playbackSpeedRef.current || 1;
-    const duration = Math.max(120, Math.floor(420 / speed));
+    const duration = Math.max(120, Math.floor(480 / speed));
     const startTime = performance.now();
 
     const animateTraverse = (currentTime) => {
       const elapsed = currentTime - startTime;
       const progress = Math.min(1, elapsed / duration);
-      const e = easeInOutCubic(progress);
+      const eased = easeInOutCubic(progress);
 
-      const curLng = uLng + (vLng - uLng) * e;
-      const curLat = uLat + (vLat - uLat) * e;
-      const curCoord = [curLng, curLat];
+      const { partialCoords, tipCoord, angleDeg } = slicePolylineByProgress(orientedCoords, eased);
 
       if (traversingSource) {
         traversingSource.setData({
@@ -1778,7 +1884,7 @@ export default function MapCanvas({
               type: 'Feature',
               geometry: {
                 type: 'LineString',
-                coordinates: [p1, curCoord],
+                coordinates: partialCoords.length >= 2 ? partialCoords : [orientedCoords[0], tipCoord],
               },
             },
           ],
@@ -1786,7 +1892,10 @@ export default function MapCanvas({
       }
 
       if (snakeArrowMarkerRef.current) {
-        snakeArrowMarkerRef.current.setLngLat(curCoord);
+        snakeArrowMarkerRef.current.setLngLat(tipCoord);
+      }
+      if (arrowInner) {
+        arrowInner.style.transform = `rotate(${angleDeg}deg)`;
       }
 
       if (progress < 1) {
@@ -1846,12 +1955,34 @@ export default function MapCanvas({
     if (currentPathNodes.length < 2) return false;
 
     const nMap = nodesMapRef.current || {};
-    const pathCoords = currentPathNodes
-      .map((id) => nMap[id])
-      .filter((n) => n && n.lat != null && n.lng != null)
-      .map((n) => [Number(n.lng), Number(n.lat)]);
+    const currentEdges = edgesRef.current || [];
 
-    if (pathCoords.length < 2) return false;
+    // Stitch the full route polyline by concatenating getEdgePolyline(...)
+    // oriented forward along path_nodes across every hop of the winning path.
+    const fullRouteCoords = [];
+    for (let i = 0; i < currentPathNodes.length - 1; i++) {
+      const uId = currentPathNodes[i];
+      const vId = currentPathNodes[i + 1];
+      const u = nMap[uId];
+      const v = nMap[vId];
+      if (!u || !v || u.lat == null || u.lng == null || v.lat == null || v.lng == null) {
+        continue;
+      }
+      const edge = currentEdges.find(
+        (e) => (e.source_id === uId && e.target_id === vId) || (e.source_id === vId && e.target_id === uId)
+      );
+      const hopCoords = getEdgePolyline(edge || { id: `${uId}->${vId}` }, u, v);
+      if (hopCoords && hopCoords.length > 0) {
+        if (fullRouteCoords.length === 0) {
+          fullRouteCoords.push(...hopCoords);
+        } else {
+          // Avoid duplicate junction point
+          fullRouteCoords.push(...hopCoords.slice(1));
+        }
+      }
+    }
+
+    if (fullRouteCoords.length < 2) return false;
 
     const routeDrawnSource = map.getSource('edges-route-drawn-source');
     const thisPickupId = activePickupIdRef.current;
@@ -1885,13 +2016,13 @@ export default function MapCanvas({
         anchor: 'center',
         subpixelPositioning: false,
       })
-        .setLngLat(pathCoords[0])
+        .setLngLat(fullRouteCoords[0])
         .addTo(map);
 
       carMarkerRef.current = carMarker;
     } else {
       carMarker.getElement().style.display = 'block';
-      carMarker.setLngLat(pathCoords[0]);
+      carMarker.setLngLat(fullRouteCoords[0]);
     }
 
     setIsCarDriving(true);
@@ -1904,21 +2035,8 @@ export default function MapCanvas({
     // 2. Start startCarHum(playbackSpeed) as the car accelerates smoothly along path_nodes
     startCarHum(speed);
 
-    // Pre-calculate segment lengths and total path distance for 85% braking detection
-    const segmentDistances = [];
-    let totalPathDist = 0;
-    for (let i = 0; i < pathCoords.length - 1; i++) {
-      const dX = pathCoords[i + 1][0] - pathCoords[i][0];
-      const dY = pathCoords[i + 1][1] - pathCoords[i][1];
-      const dist = Math.hypot(dX, dY);
-      segmentDistances.push(dist);
-      totalPathDist += dist;
-    }
-
-    let cumulatedDistance = 0;
-    let brakeTriggered = false;
-
     // Initialize edges-route-drawn-source at the starting point
+    const startSlice = slicePolylineByProgress(fullRouteCoords, 0);
     if (routeDrawnSource) {
       routeDrawnSource.setData({
         type: 'FeatureCollection',
@@ -1927,38 +2045,76 @@ export default function MapCanvas({
             type: 'Feature',
             geometry: {
               type: 'LineString',
-              coordinates: [pathCoords[0], pathCoords[0]],
+              coordinates: [fullRouteCoords[0], fullRouteCoords[0]],
             },
           },
         ],
       });
     }
 
-    let segmentIdx = 0;
-    let progress = 0;
-    const currentSpeed = 0.022 * speed;
+    const miniInner = carMarkerRef.current?.getElement()?.querySelector('#eco-mr-bean-mini');
+    if (miniInner) {
+      miniInner.style.transform = `rotate(${startSlice.angleDeg}deg)`;
+    }
 
-    const updateHeading = (p1, p2) => {
-      const currentMap = mapRef.current;
-      if (!currentMap) return;
-      const pt1 = currentMap.project(p1);
-      const pt2 = currentMap.project(p2);
-      const dX = pt2.x - pt1.x;
-      const dY = pt2.y - pt1.y;
-      const angleDeg = Math.atan2(dY, dX) * (180 / Math.PI);
-      const inner = carMarkerRef.current?.getElement()?.querySelector('#eco-mr-bean-mini');
-      if (inner) {
-        inner.style.transform = `rotate(${angleDeg}deg)`;
+    let brakeTriggered = false;
+    const duration = Math.max(1200, (currentPathNodes.length - 1) * 950) / speed;
+    const startTime = performance.now();
+
+    const stepDrive = (currentTime) => {
+      const elapsed = currentTime - startTime;
+      const progress = Math.min(1, elapsed / duration);
+
+      const { partialCoords, tipCoord, angleDeg } = slicePolylineByProgress(fullRouteCoords, progress);
+
+      if (carMarkerRef.current) {
+        carMarkerRef.current.setLngLat(tipCoord);
       }
-    };
 
-    updateHeading(pathCoords[0], pathCoords[1]);
+      const innerEl = carMarkerRef.current?.getElement()?.querySelector('#eco-mr-bean-mini');
+      if (innerEl) {
+        innerEl.style.transform = `rotate(${angleDeg}deg)`;
+      }
 
-    const stepDrive = () => {
-      if (segmentIdx >= pathCoords.length - 1) {
+      // Smoothly paint winning route directly behind the car in real time
+      if (routeDrawnSource) {
+        routeDrawnSource.setData({
+          type: 'FeatureCollection',
+          features: [
+            {
+              type: 'Feature',
+              geometry: {
+                type: 'LineString',
+                coordinates: partialCoords.length >= 2 ? partialCoords : [fullRouteCoords[0], tipCoord],
+              },
+            },
+          ],
+        });
+      }
+
+      // 3. At 85% of total path distance, turn .car-brakelights ON, call stopCarHum(), and fire playCarBrakeAndArrive()
+      if (progress >= 0.85 && !brakeTriggered) {
+        brakeTriggered = true;
+        setCarLights(true, true);
+        stopCarHum();
+        playCarBrakeAndArrive();
+      }
+
+      if (progress < 1) {
+        carAnimFrameRef.current = requestAnimationFrame(stepDrive);
+      } else {
         // Physical arrival at destination recycling centre
+        carAnimFrameRef.current = null;
+        stopCarHum();
+
+        if (!brakeTriggered) {
+          brakeTriggered = true;
+          setCarLights(true, true);
+          playCarBrakeAndArrive();
+        }
+
         if (carMarkerRef.current) {
-          carMarkerRef.current.setLngLat(pathCoords[pathCoords.length - 1]);
+          carMarkerRef.current.setLngLat(fullRouteCoords[fullRouteCoords.length - 1]);
         }
         if (routeDrawnSource) {
           routeDrawnSource.setData({
@@ -1968,23 +2124,12 @@ export default function MapCanvas({
                 type: 'Feature',
                 geometry: {
                   type: 'LineString',
-                  coordinates: pathCoords,
+                  coordinates: fullRouteCoords,
                 },
               },
             ],
           });
         }
-
-        // Cleanly stop engine hum
-        stopCarHum();
-
-        if (!brakeTriggered) {
-          brakeTriggered = true;
-          setCarLights(true, true);
-          playCarBrakeAndArrive();
-        }
-
-        carAnimFrameRef.current = null;
 
         // 4. On arrival, keep .car-brakelights lit for ~550ms before fading lights off,
         // then trigger onVehicleFinish(pickupId).
@@ -1994,62 +2139,7 @@ export default function MapCanvas({
           setIsCarDriving(false);
           onVehicleFinishRef.current?.(thisPickupId);
         }, 550);
-
-        return;
       }
-
-      const p1 = pathCoords[segmentIdx];
-      const p2 = pathCoords[segmentIdx + 1];
-
-      const currentLng = p1[0] + (p2[0] - p1[0]) * progress;
-      const currentLat = p1[1] + (p2[1] - p1[1]) * progress;
-      const currentCoord = [currentLng, currentLat];
-
-      if (carMarkerRef.current) {
-        carMarkerRef.current.setLngLat(currentCoord);
-      }
-
-      // Smoothly paint winning route directly behind the car in real time
-      if (routeDrawnSource) {
-        const drawn = [...pathCoords.slice(0, segmentIdx + 1), currentCoord];
-        routeDrawnSource.setData({
-          type: 'FeatureCollection',
-          features: [
-            {
-              type: 'Feature',
-              geometry: {
-                type: 'LineString',
-                coordinates: drawn,
-              },
-            },
-          ],
-        });
-      }
-
-      // 3. At 85% of total path distance (once per drive), turn .car-brakelights ON,
-      // call stopCarHum(), and fire playCarBrakeAndArrive().
-      const currentSegDist = segmentDistances[segmentIdx] || 0;
-      const distTraveled = cumulatedDistance + currentSegDist * progress;
-      const overallProgress = totalPathDist > 0 ? distTraveled / totalPathDist : progress;
-
-      if (overallProgress >= 0.85 && !brakeTriggered) {
-        brakeTriggered = true;
-        setCarLights(true, true);
-        stopCarHum();
-        playCarBrakeAndArrive();
-      }
-
-      progress += currentSpeed;
-      if (progress >= 1) {
-        cumulatedDistance += segmentDistances[segmentIdx] || 0;
-        progress = 0;
-        segmentIdx += 1;
-        if (segmentIdx < pathCoords.length - 1) {
-          updateHeading(pathCoords[segmentIdx], pathCoords[segmentIdx + 1]);
-        }
-      }
-
-      carAnimFrameRef.current = requestAnimationFrame(stepDrive);
     };
 
     carAnimFrameRef.current = requestAnimationFrame(stepDrive);

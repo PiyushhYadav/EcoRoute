@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Routes, Route, NavLink, Link, useNavigate } from 'react-router-dom';
+import { Routes, Route, NavLink, Link, useNavigate, Navigate } from 'react-router-dom';
 import {
   Truck,
-  MapPin,
   BarChart3,
   BookOpen,
   RotateCcw,
@@ -15,7 +14,6 @@ import {
 } from 'lucide-react';
 import OverviewPage from './pages/OverviewPage';
 import DispatchPage from './pages/DispatchPage';
-import SchedulePage from './pages/SchedulePage';
 import AnalyticsPage from './pages/AnalyticsPage';
 import ConceptsModal from './components/ConceptsModal';
 import { api } from './api/client';
@@ -80,7 +78,7 @@ export default function App() {
             </div>
           </Link>
 
-          {/* 4 Navigation Tabs */}
+          {/* 3 Navigation Tabs */}
           <nav className="hidden md:flex items-center gap-1 bg-slate-100/70 p-1 rounded-xl border border-slate-200 text-xs font-semibold">
             <NavLink
               to="/"
@@ -108,20 +106,6 @@ export default function App() {
             >
               <RouteIcon className="w-3.5 h-3.5 text-emerald-600" />
               <span>Live Dispatch</span>
-            </NavLink>
-
-            <NavLink
-              to="/schedule"
-              className={({ isActive }) =>
-                `px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
-                  isActive
-                    ? 'bg-white text-emerald-800 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`
-              }
-            >
-              <MapPin className="w-3.5 h-3.5" />
-              <span>Schedule Pickup</span>
             </NavLink>
 
             <NavLink
@@ -204,20 +188,12 @@ export default function App() {
             Live Dispatch
           </NavLink>
           <NavLink
-            to="/schedule"
-            className={({ isActive }) =>
-              `px-2 py-1 rounded ${isActive ? 'text-emerald-700 font-bold' : 'text-slate-600'}`
-            }
-          >
-            Schedule
-          </NavLink>
-          <NavLink
             to="/analytics"
             className={({ isActive }) =>
               `px-2 py-1 rounded ${isActive ? 'text-emerald-700 font-bold' : 'text-slate-600'}`
             }
           >
-            Analytics
+            Centres & Analytics
           </NavLink>
         </div>
       </header>
@@ -227,7 +203,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<OverviewPage />} />
           <Route path="/dispatch" element={<DispatchPage />} />
-          <Route path="/schedule" element={<SchedulePage />} />
+          <Route path="/schedule" element={<Navigate to="/dispatch" replace />} />
           <Route path="/analytics" element={<AnalyticsPage />} />
           <Route path="*" element={<OverviewPage />} />
         </Routes>

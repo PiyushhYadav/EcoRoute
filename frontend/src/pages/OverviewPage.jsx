@@ -218,11 +218,6 @@ export default function OverviewPage() {
           
           {/* Left Column: Mission & Interactive Route Inspector (7 cols) */}
           <div className="lg:col-span-7 space-y-6">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200/70 text-emerald-800 text-xs font-semibold tracking-wide">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-              <span>MUNICIPAL E-WASTE INTELLIGENCE · DELHI NCR</span>
-            </div>
-
             <h1 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-slate-950 tracking-tight leading-[1.12]">
               Optimal Routes. <br />
               <span className="text-emerald-700">Zero Toxic Landfills.</span>
@@ -316,10 +311,10 @@ export default function OverviewPage() {
                 <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
               </Link>
               <Link
-                to="/schedule"
+                to="/dispatch"
                 className="px-5 py-2.5 rounded-xl bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 font-semibold text-sm shadow-xs transition-colors"
               >
-                Schedule New Consignment
+                Open Live Dispatch
               </Link>
             </div>
           </div>
@@ -631,10 +626,6 @@ export default function OverviewPage() {
          ========================================================================= */}
       <div className="p-8 sm:p-10 rounded-3xl bg-slate-950 text-white relative overflow-hidden shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-6 border border-slate-800">
         <div className="space-y-2 max-w-xl">
-          <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 text-xs font-semibold">
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>Interactive Simulator Workspace</span>
-          </div>
           <h3 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
             Ready to test dynamic road disruptions?
           </h3>
@@ -652,10 +643,10 @@ export default function OverviewPage() {
             <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
           </Link>
           <Link
-            to="/schedule"
+            to="/analytics"
             className="px-6 py-3 rounded-xl bg-white/10 hover:bg-white/15 text-white font-semibold text-sm border border-white/15 transition-colors text-center"
           >
-            Add Consignment
+            Centres & Analytics
           </Link>
         </div>
       </div>
