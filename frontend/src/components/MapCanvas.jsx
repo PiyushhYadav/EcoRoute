@@ -303,6 +303,86 @@ const RECYCLE_SVG_12PX_WHITE = `
   </svg>
 `;
 
+// High-DPI Vector Status Icons (Crisp Lucide-style SVG micro-icons with specular depth)
+const STATUS_ICONS = {
+  assigned: `
+    <svg width="10.5" height="10.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="display: block; overflow: visible; shrink: 0; filter: drop-shadow(0 0.5px 1px rgba(0,0,0,0.25));">
+      <polyline points="20 6 9 17 4 12"></polyline>
+    </svg>
+  `,
+  capacity_full: `
+    <svg width="10.5" height="10.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="display: block; overflow: visible; shrink: 0; filter: drop-shadow(0 0.5px 1px rgba(0,0,0,0.25));">
+      <circle cx="12" cy="12" r="10"></circle>
+      <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"></line>
+    </svg>
+  `,
+  wrong_category: `
+    <svg width="10.5" height="10.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="display: block; overflow: visible; shrink: 0; filter: drop-shadow(0 0.5px 1px rgba(0,0,0,0.25));">
+      <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path>
+      <line x1="12" y1="9" x2="12" y2="13"></line>
+      <line x1="12" y1="17" x2="12.01" y2="17"></line>
+    </svg>
+  `,
+  blocked: `
+    <svg width="10.5" height="10.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="display: block; overflow: visible; shrink: 0; filter: drop-shadow(0 0.5px 1px rgba(0,0,0,0.25));">
+      <circle cx="12" cy="12" r="10"></circle>
+      <line x1="15" y1="9" x2="9" y2="15"></line>
+      <line x1="9" y1="9" x2="15" y2="15"></line>
+    </svg>
+  `,
+};
+
+export function renderStatusBadge(type, label) {
+  let bgGradient = '';
+  let shadow = '';
+  let iconSvg = '';
+
+  if (type === 'assigned') {
+    bgGradient = 'linear-gradient(180deg, #10B981 0%, #059669 100%)';
+    shadow = '0 2px 6px -1px rgba(5, 150, 105, 0.5), 0 1px 2px rgba(15, 23, 42, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.35)';
+    iconSvg = STATUS_ICONS.assigned;
+  } else if (type === 'capacity_full') {
+    bgGradient = 'linear-gradient(180deg, #F43F5E 0%, #E11D48 100%)';
+    shadow = '0 2px 6px -1px rgba(225, 29, 72, 0.5), 0 1px 2px rgba(15, 23, 42, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.35)';
+    iconSvg = STATUS_ICONS.capacity_full;
+  } else if (type === 'wrong_category') {
+    bgGradient = 'linear-gradient(180deg, #F59E0B 0%, #D97706 100%)';
+    shadow = '0 2px 6px -1px rgba(217, 119, 6, 0.5), 0 1px 2px rgba(15, 23, 42, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.35)';
+    iconSvg = STATUS_ICONS.wrong_category;
+  } else {
+    bgGradient = 'linear-gradient(180deg, #EF4444 0%, #DC2626 100%)';
+    shadow = '0 2px 6px -1px rgba(220, 38, 38, 0.5), 0 1px 2px rgba(15, 23, 42, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.35)';
+    iconSvg = STATUS_ICONS.blocked;
+  }
+
+  return `
+    <div class="eco-status-badge mt-1 pointer-events-none select-none">
+      <div class="eco-status-pill" style="
+        display: inline-flex;
+        align-items: center;
+        gap: 3.5px;
+        padding: 2.5px 7px 2.5px 5.5px;
+        border-radius: 9999px;
+        background: ${bgGradient};
+        border: 1px solid rgba(255, 255, 255, 0.35);
+        box-shadow: ${shadow};
+        color: #FFFFFF;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        font-size: 10px;
+        font-weight: 700;
+        line-height: 1;
+        letter-spacing: 0.015em;
+        -webkit-font-smoothing: antialiased;
+        text-shadow: 0 1px 1.5px rgba(0, 0, 0, 0.28);
+        white-space: nowrap;
+      ">
+        ${iconSvg}
+        <span>${label}</span>
+      </div>
+    </div>
+  `;
+}
+
 // Iconic Mr. Bean Lime-Green Mini Cooper with Matte-Black Hood SVG + Dynamic Reactive Lighting + 2.5D Depth
 const MR_BEAN_MINI_COOPER_HTML = `
   <div id="eco-mr-bean-mini" style="
@@ -1604,16 +1684,16 @@ export default function MapCanvas({
         if (isGreedyOrConfirm) {
           if (step.event_type === 'route_confirm' && isWinningAssignedDestination) {
             // Winning assigned destination on route_confirm must ALWAYS display green Assigned, never red Capacity Full
-            greedyBadge = `<div class="eco-status-badge mt-0.5 pointer-events-none select-none"><span class="bg-emerald-600 text-white px-1.5 py-0.5 rounded-full text-[9px] font-bold shadow-2xs leading-none pointer-events-none select-none">Assigned</span></div>`;
+            greedyBadge = renderStatusBadge('assigned', 'Assigned');
           } else if (check) {
             if (isAssignedCentre) {
-              greedyBadge = `<div class="eco-status-badge mt-0.5 pointer-events-none select-none"><span class="bg-emerald-600 text-white px-1.5 py-0.5 rounded-full text-[9px] font-bold shadow-2xs leading-none pointer-events-none select-none">Assigned</span></div>`;
+              greedyBadge = renderStatusBadge('assigned', 'Assigned');
             } else if (check.status_badge === 'capacity_full' || (check.reason && check.reason.toLowerCase().includes('capacity'))) {
-              greedyBadge = `<div class="eco-status-badge mt-0.5 pointer-events-none select-none"><span class="bg-rose-600 text-white px-1.5 py-0.5 rounded-full text-[9px] font-bold shadow-2xs leading-none pointer-events-none select-none">Capacity Full</span></div>`;
+              greedyBadge = renderStatusBadge('capacity_full', 'Capacity Full');
             } else if (check.status_badge === 'wrong_category' || (check.reason && check.reason.toLowerCase().includes('category'))) {
-              greedyBadge = `<div class="eco-status-badge mt-0.5 pointer-events-none select-none"><span class="bg-amber-600 text-white px-1.5 py-0.5 rounded-full text-[9px] font-bold shadow-2xs leading-none pointer-events-none select-none">Wrong Type</span></div>`;
+              greedyBadge = renderStatusBadge('wrong_category', 'Wrong Type');
             } else if (check.reason && check.reason.toLowerCase().includes('blocked')) {
-              greedyBadge = `<div class="eco-status-badge mt-0.5 pointer-events-none select-none"><span class="bg-rose-600 text-white px-1.5 py-0.5 rounded-full text-[9px] font-bold shadow-2xs leading-none pointer-events-none select-none">Blocked</span></div>`;
+              greedyBadge = renderStatusBadge('blocked', 'Blocked');
             }
           }
         }

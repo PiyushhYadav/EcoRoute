@@ -321,7 +321,7 @@ export default function OverviewPage() {
             <div className="aspect-[3/4] sm:aspect-[4/5] rounded-[2.5rem] overflow-hidden shadow-2xl border border-slate-900/15 relative group bg-slate-950">
               <img
                 src="/hero_image.jpg"
-                alt="Emerald Refractor Monolith"
+                alt="EcoRoute Twilight Horizon"
                 className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
               />
               <div className="absolute inset-0 bg-gradient-to-t from-slate-950/95 via-slate-950/35 to-transparent"></div>
