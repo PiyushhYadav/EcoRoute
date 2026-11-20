@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: ecoroute
+    name: ecoroute-by-piyush
     env: python
     plan: free
     region: oregon
