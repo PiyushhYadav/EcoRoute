@@ -324,14 +324,24 @@ def run_optimization(
         for c in candidate_centres:
             cid = c["id"]
             cname = c["name"]
+            is_active = c.get("is_active", True)
+            if is_active is None:
+                is_active = True
+            if str(c.get("status", "")).lower() in ["maintenance", "offline", "inactive"]:
+                is_active = False
+
             ccost = dists.get(cid, float("inf"))
             is_reachable = (ccost < float("inf"))
-            accepted_list = c.get("accepted_types", [])
+            accepted_list = c.get("accepted_types", []) or c.get("accepted_categories", [])
             is_category_match = (ptype in accepted_list)
             rem_cap = centre_capacities[cid]["remaining"]
             has_capacity = (rem_cap >= pweight)
 
-            if not is_reachable:
+            if not is_active:
+                status_badge = "offline"
+                reason = "Offline / Maintenance"
+                accepted = False
+            elif not is_reachable:
                 status_badge = "blocked"
                 reason = "Route Blocked or Unreachable"
                 accepted = False
@@ -728,7 +738,15 @@ def run_global_optimal(
 
         for c in c_list:
             cid = c["id"]
-            accepted_types = c.get("accepted_types", [])
+            is_active = c.get("is_active", True)
+            if is_active is None:
+                is_active = True
+            if str(c.get("status", "")).lower() in ["maintenance", "offline", "inactive"]:
+                is_active = False
+            if not is_active:
+                continue
+
+            accepted_types = c.get("accepted_types", []) or c.get("accepted_categories", [])
             _, _, cost, d_km, d_min = paths_cache.get((pid, cid), ([], [], float("inf"), float("inf"), float("inf")))
 
             if cost < float("inf") and ptype in accepted_types and current_caps[cid] >= pweight:

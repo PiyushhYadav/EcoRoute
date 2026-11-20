@@ -74,6 +74,8 @@ def init_db():
             cols = [r["name"] for r in cursor.fetchall()]
             if "x" not in cols or "y" not in cols:
                 needs_recreate = True
+            elif "is_active" not in cols:
+                cursor.execute("ALTER TABLE nodes ADD COLUMN is_active INTEGER DEFAULT 1")
 
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='edges'")
         if cursor.fetchone():
@@ -100,7 +102,8 @@ def init_db():
             max_capacity_kg REAL DEFAULT 0,
             accepted_types TEXT DEFAULT '[]',
             donor_name TEXT,
-            status TEXT DEFAULT 'pending'
+            status TEXT DEFAULT 'pending',
+            is_active INTEGER DEFAULT 1
         );
         """)
 
@@ -321,8 +324,8 @@ def seed_default_delhi_data(force: bool = False):
 
         for node in nodes_data:
             cursor.execute("""
-                INSERT INTO nodes (id, name, kind, x, y, lat, lng, waste_type, weight_kg, max_capacity_kg, accepted_types, donor_name, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO nodes (id, name, kind, x, y, lat, lng, waste_type, weight_kg, max_capacity_kg, accepted_types, donor_name, status, is_active)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
             """, (
                 node["id"], node["name"], node["kind"], node["x"], node["y"],
                 node["lat"], node["lng"], node["waste_type"], node["weight_kg"],
@@ -375,6 +378,10 @@ def get_all_nodes() -> List[Dict[str, Any]]:
                 n["accepted_types"] = json.loads(n.get("accepted_types") or "[]")
             except Exception:
                 n["accepted_types"] = []
+            n["is_active"] = bool(n.get("is_active", 1) if n.get("is_active") is not None else 1)
+            n["capacity_kg"] = float(n.get("max_capacity_kg", 0.0))
+            n["accepted_categories"] = n["accepted_types"]
+            n["waste_category"] = n.get("waste_type")
             nodes.append(n)
         conn.close()
         return nodes
@@ -394,12 +401,16 @@ def get_node_by_id(node_id: str) -> Optional[Dict[str, Any]]:
             n["accepted_types"] = json.loads(n.get("accepted_types") or "[]")
         except Exception:
             n["accepted_types"] = []
+        n["is_active"] = bool(n.get("is_active", 1) if n.get("is_active") is not None else 1)
+        n["capacity_kg"] = float(n.get("max_capacity_kg", 0.0))
+        n["accepted_categories"] = n["accepted_types"]
+        n["waste_category"] = n.get("waste_type")
         return n
 
 @with_retry()
 def create_node(node_data: Dict[str, Any]) -> Dict[str, Any]:
     with _db_lock:
-        accepted = node_data.get("accepted_types", [])
+        accepted = node_data.get("accepted_types", node_data.get("accepted_categories", []))
         if isinstance(accepted, list):
             accepted_json = json.dumps(accepted)
         else:
@@ -419,11 +430,16 @@ def create_node(node_data: Dict[str, Any]) -> Dict[str, Any]:
         if lat is None or lng is None:
             lat, lng = latlng_from_xy(x, y)
 
+        waste = node_data.get("waste_type") or node_data.get("waste_category")
+        weight = float(node_data.get("weight_kg", 0.0))
+        cap = float(node_data.get("max_capacity_kg", node_data.get("capacity_kg", 0.0)))
+        is_active_val = 1 if node_data.get("is_active", True) else 0
+
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT INTO nodes (id, name, kind, x, y, lat, lng, waste_type, weight_kg, max_capacity_kg, accepted_types, donor_name, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO nodes (id, name, kind, x, y, lat, lng, waste_type, weight_kg, max_capacity_kg, accepted_types, donor_name, status, is_active)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             node_data["id"],
             node_data["name"],
@@ -432,12 +448,13 @@ def create_node(node_data: Dict[str, Any]) -> Dict[str, Any]:
             float(y),
             float(lat),
             float(lng),
-            node_data.get("waste_type"),
-            node_data.get("weight_kg", 0.0),
-            node_data.get("max_capacity_kg", 0.0),
+            waste,
+            weight,
+            cap,
             accepted_json,
             node_data.get("donor_name"),
-            node_data.get("status", "pending")
+            node_data.get("status", "pending"),
+            is_active_val
         ))
         conn.commit()
         conn.close()
@@ -457,9 +474,18 @@ def update_node(node_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any
         values = []
         for k, v in updates.items():
             if v is not None:
-                if k == "accepted_types" and isinstance(v, list):
-                    fields.append(f"{k} = ?")
+                if k in ("accepted_types", "accepted_categories") and isinstance(v, list):
+                    fields.append("accepted_types = ?")
                     values.append(json.dumps(v))
+                elif k in ("capacity_kg", "max_capacity_kg"):
+                    fields.append("max_capacity_kg = ?")
+                    values.append(float(v))
+                elif k in ("waste_category", "waste_type"):
+                    fields.append("waste_type = ?")
+                    values.append(v)
+                elif k == "is_active":
+                    fields.append("is_active = ?")
+                    values.append(1 if v else 0)
                 else:
                     fields.append(f"{k} = ?")
                     values.append(v)

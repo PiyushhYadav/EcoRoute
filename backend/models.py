@@ -14,11 +14,31 @@ class NodeModel(BaseModel):
     lat: Optional[float] = 28.6
     lng: Optional[float] = 77.2
     waste_type: Optional[WasteTypeLiteral] = None
+    waste_category: Optional[str] = None
     weight_kg: float = 0.0
     max_capacity_kg: float = 0.0
+    capacity_kg: Optional[float] = None
     accepted_types: List[WasteTypeLiteral] = Field(default_factory=list)
+    accepted_categories: Optional[List[str]] = None
     donor_name: Optional[str] = None
     status: str = "pending"
+    is_active: bool = True
+
+class NodeUpdate(BaseModel):
+    name: Optional[str] = None
+    waste_type: Optional[WasteTypeLiteral] = None
+    waste_category: Optional[str] = None
+    weight_kg: Optional[float] = Field(default=None, gt=0)
+    max_capacity_kg: Optional[float] = Field(default=None, ge=0)
+    capacity_kg: Optional[float] = Field(default=None, ge=0)
+    accepted_types: Optional[List[WasteTypeLiteral]] = None
+    accepted_categories: Optional[List[str]] = None
+    is_active: Optional[bool] = None
+    status: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    x: Optional[float] = None
+    y: Optional[float] = None
 
 class PickupCreate(BaseModel):
     name: str
@@ -98,7 +118,7 @@ class CandidateEvaluation(BaseModel):
     is_reachable: bool
     is_category_match: bool
     has_capacity: bool
-    status_badge: Literal["assigned", "wrong_category", "capacity_full", "blocked"]
+    status_badge: Literal["assigned", "wrong_category", "capacity_full", "blocked", "offline", "maintenance"]
     accepted: bool
     reason: str
 

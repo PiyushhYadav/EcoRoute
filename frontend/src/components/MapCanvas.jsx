@@ -450,6 +450,7 @@ export default function MapCanvas({
   onSelectPickup = () => {},
   onMetricChange = () => {},
   onSelectEdge = () => {},
+  onInspectNode = () => {},
   onCreatePickup = () => {},
   onCreateCentre = () => {},
   onConnectNodes = () => {},
@@ -604,6 +605,8 @@ export default function MapCanvas({
   connectSourceNodeRef.current = connectSourceNode;
   const onSelectEdgeRef = useRef(onSelectEdge);
   onSelectEdgeRef.current = onSelectEdge;
+  const onInspectNodeRef = useRef(onInspectNode);
+  onInspectNodeRef.current = onInspectNode;
   const onCreatePickupRef = useRef(onCreatePickup);
   onCreatePickupRef.current = onCreatePickup;
   const onCreateCentreRef = useRef(onCreateCentre);
@@ -1623,11 +1626,20 @@ export default function MapCanvas({
               setConnectSourceNode(null);
               setMode('inspect');
             }
-          } else if (currentMode === 'inspect') {
-            if (nodeKind === 'pickup' && onSelectPickupRef.current) {
-              onSelectPickupRef.current(node.id);
+            return;
+          }
+
+          const kind = String(node.kind || node.type || (node.id && node.id.startsWith('P') ? 'pickup' : node.id && node.id.startsWith('R') ? 'centre' : '')).toLowerCase();
+          if (modeRef.current === 'inspect' && (kind === 'pickup' || kind === 'centre')) {
+            if (hoverPopupRef.current) {
+              hoverPopupRef.current.remove();
             }
-            showToast(`${getNodeDisplayLabel(node)} (${nodeKind.toUpperCase()})`, 'info');
+            onInspectNodeRef.current?.(node);
+            return;
+          }
+
+          if (modeRef.current === 'inspect') {
+            showToast(`${getNodeDisplayLabel(node)} (${kind.toUpperCase()})`, 'info');
           }
         };
       }

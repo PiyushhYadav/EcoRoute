@@ -75,6 +75,22 @@ export const api = {
     return handleResponse(res);
   },
 
+  async updateNode(nodeId, payload) {
+    const res = await fetch(`${API_BASE}/nodes/${nodeId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return handleResponse(res);
+  },
+
+  async deleteNode(nodeId) {
+    const res = await fetch(`${API_BASE}/nodes/${nodeId}`, {
+      method: 'DELETE',
+    });
+    return handleResponse(res);
+  },
+
   async createEdge(edgeData) {
     const res = await fetch(`${API_BASE}/edges`, {
       method: 'POST',
@@ -112,3 +128,7 @@ export const api = {
     return handleResponse(res);
   },
 };
+
+export const updateNode = (nodeId, payload) => api.updateNode(nodeId, payload);
+export const deleteNode = (nodeId) => api.deleteNode(nodeId);
+export default api;

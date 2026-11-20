@@ -16,6 +16,7 @@ from fastapi.responses import FileResponse
 
 from models import (
     NodeModel,
+    NodeUpdate,
     PickupCreate,
     PickupUpdate,
     CentreCreate,
@@ -25,6 +26,7 @@ from models import (
     EdgeUpdate,
     GraphResponse,
     OptimizationResponse,
+    WASTE_CATEGORIES,
 )
 import database as db
 import algorithms as algo
@@ -205,6 +207,72 @@ def delete_centre(node_id: str):
     db.delete_node(node_id)
     return {"message": f"Centre '{node_id}' and attached road edges deleted successfully."}
 
+# --- Generic Nodes (Pickups & Centres) ---
+
+@app.patch("/api/nodes/{node_id}", response_model=NodeModel)
+@app.put("/api/nodes/{node_id}", response_model=NodeModel)
+def update_node_endpoint(node_id: str, updates: NodeUpdate):
+    existing = db.get_node_by_id(node_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail=f"Node '{node_id}' not found.")
+
+    update_dict = updates.model_dump(exclude_unset=True)
+    kind = existing.get("kind", "")
+
+    # Normalization & Validation for Pickups
+    if kind == "pickup":
+        waste = update_dict.get("waste_category") or update_dict.get("waste_type")
+        if waste is not None:
+            if waste not in WASTE_CATEGORIES:
+                raise HTTPException(status_code=400, detail=f"Invalid waste category '{waste}'. Allowed: {WASTE_CATEGORIES}")
+            update_dict["waste_type"] = waste
+
+        if "weight_kg" in update_dict:
+            wt = update_dict["weight_kg"]
+            if wt is None or wt <= 0:
+                raise HTTPException(status_code=400, detail="Pickup weight_kg must be greater than 0.")
+
+    # Normalization & Validation for Centres
+    elif kind == "centre":
+        cap = update_dict.get("capacity_kg") if "capacity_kg" in update_dict else update_dict.get("max_capacity_kg")
+        if cap is not None:
+            if cap < 0:
+                raise HTTPException(status_code=400, detail="Centre capacity_kg must be greater than or equal to 0.")
+            update_dict["max_capacity_kg"] = cap
+
+        cats = update_dict.get("accepted_categories") or update_dict.get("accepted_types")
+        if cats is not None:
+            if not isinstance(cats, list):
+                raise HTTPException(status_code=400, detail="Accepted categories must be a list of strings.")
+            for c in cats:
+                if c not in WASTE_CATEGORIES:
+                    raise HTTPException(status_code=400, detail=f"Invalid category '{c}'. Allowed: {WASTE_CATEGORIES}")
+            update_dict["accepted_types"] = cats
+
+        if "is_active" in update_dict:
+            active = bool(update_dict["is_active"])
+            update_dict["is_active"] = active
+            if "status" not in update_dict:
+                update_dict["status"] = "active" if active else "maintenance"
+
+    if ("x" in update_dict or "y" in update_dict) and ("lat" not in update_dict or "lng" not in update_dict):
+        x = update_dict.get("x", existing["x"])
+        y = update_dict.get("y", existing["y"])
+        lat, lng = db.latlng_from_xy(x, y)
+        update_dict["lat"] = lat
+        update_dict["lng"] = lng
+
+    updated = db.update_node(node_id, update_dict)
+    return updated
+
+@app.delete("/api/nodes/{node_id}")
+def delete_node_endpoint(node_id: str):
+    existing = db.get_node_by_id(node_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail=f"Node '{node_id}' not found.")
+    db.delete_node(node_id)
+    return {"message": f"Node '{node_id}' and attached road edges deleted successfully."}
+
 # --- Edges ---
 
 @app.post("/api/edges", response_model=EdgeModel, status_code=status.HTTP_201_CREATED)
@@ -252,6 +320,7 @@ def optimize(
 
 # --- Reset Demo Data ---
 
+@app.post("/api/reset")
 @app.post("/api/reset-demo")
 def reset_demo():
     db.init_db()

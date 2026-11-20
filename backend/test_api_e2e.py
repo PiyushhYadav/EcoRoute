@@ -109,6 +109,62 @@ def test_api():
     assert updated_e["traffic_multiplier"] == 2.5
     assert updated_e["effective_distance_km"] == round(created_e["base_distance_km"] * 2.5, 1)
 
+    print("Testing PATCH /api/nodes/P1 (pickup)...")
+    res = client.patch("/api/nodes/P1", json={
+        "name": "Janakpuri West Updated",
+        "waste_category": "Smartphones",
+        "weight_kg": 15.0
+    })
+    assert res.status_code == 200
+    p1_updated = res.json()
+    assert p1_updated["name"] == "Janakpuri West Updated"
+    assert p1_updated["waste_type"] == "Smartphones"
+    assert p1_updated["weight_kg"] == 15.0
+
+    print("Testing PATCH /api/nodes/R2 (centre to maintenance)...")
+    res = client.patch("/api/nodes/R2", json={
+        "name": "Mayapuri Hub Testing",
+        "capacity_kg": 30.0,
+        "accepted_categories": ["Batteries", "Smartphones", "Computers", "Appliances"],
+        "is_active": False
+    })
+    assert res.status_code == 200
+    r2_updated = res.json()
+    assert r2_updated["name"] == "Mayapuri Hub Testing"
+    assert r2_updated["max_capacity_kg"] == 30.0
+    assert r2_updated["is_active"] is False
+
+    # Check greedy evaluation skips R2 with Offline / Maintenance
+    res = client.get("/api/optimize?order=default&metric=time")
+    assert res.status_code == 200
+    opt_data = res.json()
+    for walk in opt_data["pickup_walkthroughs"]:
+        eval_step = next((s for s in walk["steps"] if s["event_type"] == "greedy_eval"), None)
+        if eval_step:
+            r2_eval = next((c for c in eval_step["candidate_checklist"] if c["centre_id"] == "R2"), None)
+            if r2_eval:
+                assert r2_eval["accepted"] is False
+                assert r2_eval["status_badge"] == "offline"
+                assert "Offline / Maintenance" in r2_eval["reason"]
+
+    print("Testing DELETE /api/nodes/:id (cascade edges)...")
+    res = client.delete(f"/api/nodes/{created_p['id']}")
+    assert res.status_code == 200
+    # Verify created_e was also deleted
+    graph_res = client.get("/api/graph").json()
+    assert not any(n["id"] == created_p["id"] for n in graph_res["nodes"])
+    assert not any(e["id"] == created_e["id"] for e in graph_res["edges"])
+
+    print("Testing POST /api/reset restores original defaults...")
+    res = client.post("/api/reset")
+    assert res.status_code == 200
+    reset_graph = client.get("/api/graph").json()
+    assert len(reset_graph["nodes"]) == 11
+    assert len(reset_graph["edges"]) == 18
+    r2_node = next(n for n in reset_graph["nodes"] if n["id"] == "R2")
+    assert r2_node["is_active"] is True
+    assert r2_node["name"] == "Mayapuri Hub"
+
     # Reset demo back to 11 clean nodes
     client.post("/api/reset-demo")
 

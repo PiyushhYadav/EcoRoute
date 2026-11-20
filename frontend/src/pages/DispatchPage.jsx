@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import MapCanvas from '../components/MapCanvas';
 import InspectorPanel from '../components/InspectorPanel';
 import DisruptionModal from '../components/DisruptionModal';
+import NodeConfigModal from '../components/NodeConfigModal';
 import { api } from '../api/client';
 import { unlockAudio, stopAllSounds } from '../utils/soundEngine';
 
@@ -34,6 +35,22 @@ export default function DispatchPage() {
   // Disruption modal state
   const [selectedEdge, setSelectedEdge] = useState(null);
   const [isDisruptionModalOpen, setIsDisruptionModalOpen] = useState(false);
+
+  // Node config modal state
+  const [selectedConfigNode, setSelectedConfigNode] = useState(null);
+  const [isNodeModalOpen, setIsNodeModalOpen] = useState(false);
+
+  // Toast feedback state
+  const [toast, setToast] = useState(null);
+  const toastTimerRef = useRef(null);
+
+  const showToast = useCallback((msg) => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToast(msg);
+    toastTimerRef.current = setTimeout(() => {
+      setToast(null);
+    }, 3500);
+  }, []);
 
   // Preview path override state (when hovering matrix cell)
   const [previewPathNodes, setPreviewPathNodes] = useState(null);
@@ -369,6 +386,44 @@ export default function DispatchPage() {
     await loadData(dispatchOrder, metric);
   };
 
+  // Node Inspection & Configuration Handlers
+  const handleInspectNode = useCallback(
+    (node) => {
+      handleStopAll();
+      stopAllSounds();
+      const freshNode = nodes.find((n) => n.id === node.id) || node;
+      setSelectedConfigNode(freshNode);
+      setIsNodeModalOpen(true);
+    },
+    [handleStopAll, nodes]
+  );
+
+  const handleSaveNode = async (nodeId, payload) => {
+    await api.updateNode(nodeId, payload);
+    await loadData(dispatchOrder, metric);
+    const nodeName = payload.name || selectedConfigNode?.name || nodeId;
+    showToast(`Updated ${nodeName} — routes recalculated`);
+  };
+
+  const handleDeleteNode = async (nodeId) => {
+    if (selectedPickupId === nodeId) {
+      const remainingPickups = nodes.filter(
+        (n) => (n.kind === 'pickup' || (n.id && n.id.startsWith('P'))) && n.id !== nodeId
+      );
+      if (remainingPickups.length > 0) {
+        setSelectedPickupId(remainingPickups[0].id);
+      } else {
+        setSelectedPickupId('ALL');
+      }
+      setCurrentStepIndex(0);
+      setPreviewPathNodes(null);
+    }
+    await api.deleteNode(nodeId);
+    await loadData(dispatchOrder, metric);
+    const nodeName = selectedConfigNode?.name || nodeId;
+    showToast(`Deleted ${nodeName} — network updated`);
+  };
+
   // Quick Presets
   const handleApplyDisruptionPreset = async (preset) => {
     handleStopAll();
@@ -448,6 +503,15 @@ export default function DispatchPage() {
     });
     return map;
   }, [nodes]);
+
+  const pickupsCount = React.useMemo(
+    () => nodes.filter((n) => n.kind === 'pickup' || (n.id && n.id.startsWith('P'))).length,
+    [nodes]
+  );
+  const centresCount = React.useMemo(
+    () => nodes.filter((n) => n.kind === 'centre' || (n.id && n.id.startsWith('R'))).length,
+    [nodes]
+  );
 
   // Resolve step to pass to canvas
   const canvasStep = React.useMemo(() => {
@@ -529,6 +593,7 @@ export default function DispatchPage() {
             onSelectPickup={handleSelectPickupTab}
             onMetricChange={handleSetMetric}
             onSelectEdge={handleEdgeClick}
+            onInspectNode={handleInspectNode}
             onCreatePickup={handleCreatePickup}
             onCreateCentre={handleCreateCentre}
             onConnectNodes={handleConnectNodes}
@@ -546,6 +611,26 @@ export default function DispatchPage() {
         onSave={handleSaveEdge}
         onDelete={handleDeleteEdge}
       />
+
+      {/* Node (Pickup & Recycling Site) Configuration Modal */}
+      <NodeConfigModal
+        node={selectedConfigNode}
+        isOpen={isNodeModalOpen}
+        onClose={() => setIsNodeModalOpen(false)}
+        onSave={handleSaveNode}
+        onDelete={handleDeleteNode}
+        allocations={greedySummary?.allocations || []}
+        centreCapacities={activeStep?.centre_capacities || {}}
+        pickupsCount={pickupsCount}
+        centresCount={centresCount}
+      />
+
+      {/* Live Toast Notification */}
+      {toast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[60] px-4 py-2 rounded-full text-xs font-semibold shadow-xl backdrop-blur-md bg-slate-900/90 text-slate-100 border border-slate-700/50 flex items-center gap-2 pointer-events-none animate-fade-in">
+          <span>{toast}</span>
+        </div>
+      )}
     </div>
   );
 }
