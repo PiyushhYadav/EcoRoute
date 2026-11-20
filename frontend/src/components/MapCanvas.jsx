@@ -92,6 +92,18 @@ const DEFAULT_NODE_DESTINATIONS = {
   P4: { destId: 'R3', destName: 'Bawana Plant', time: 28.0, dist: 19.0, path: ['P4', 'R3'], weight: 15.0, waste: 'Appliances' },
 };
 
+export function isMapReady(map) {
+  if (!map) return false;
+  try {
+    if (typeof map.getStyle === 'function') {
+      return Boolean(map.getStyle());
+    }
+    return Boolean(map.isStyleLoaded && map.isStyleLoaded());
+  } catch (e) {
+    return false;
+  }
+}
+
 function getNodeKind(node) {
   if (!node) return 'junction';
   if (node.kind) return node.kind;
@@ -695,7 +707,7 @@ export default function MapCanvas({
   // 2. Ensure Graph GeoJSON Sources & Line Layers on Map (ZERO filter expressions)
   const ensureGraphLayers = useCallback((map) => {
     const targetMap = map || mapRef.current;
-    if (!targetMap || !targetMap.isStyleLoaded()) return;
+    if (!isMapReady(targetMap)) return;
 
     // 1. edges-base-source & layers: edges-casing FIRST, then edges-base on top
     if (!targetMap.getSource('edges-base-source')) {
@@ -899,7 +911,7 @@ export default function MapCanvas({
   const updateAllEdgeSources = useCallback(
     (map, currentEdges, currentNodes, excludedEdgeId = null) => {
       const targetMap = map || mapRef.current;
-      if (!targetMap || !targetMap.isStyleLoaded()) return;
+      if (!isMapReady(targetMap)) return;
       ensureGraphLayers(targetMap);
 
       const baseSource = targetMap.getSource('edges-base-source');
@@ -1643,7 +1655,7 @@ export default function MapCanvas({
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !map.isStyleLoaded()) return;
+    if (!isMapReady(map)) return;
 
     ensureGraphLayers(map);
     const traversingSource = map.getSource('edges-traversing-source');
@@ -1815,11 +1827,11 @@ export default function MapCanvas({
 
   const animateVehicle = useCallback(() => {
     const map = mapRef.current;
-    if (!map || !map.isStyleLoaded()) return;
+    if (!isMapReady(map)) return false;
 
     ensureGraphLayers(map);
     const currentPathNodes = activePathNodesRef.current || [];
-    if (currentPathNodes.length < 2) return;
+    if (currentPathNodes.length < 2) return false;
 
     const nMap = nodesMapRef.current || {};
     const pathCoords = currentPathNodes
@@ -1827,7 +1839,7 @@ export default function MapCanvas({
       .filter((n) => n && n.lat != null && n.lng != null)
       .map((n) => [Number(n.lng), Number(n.lat)]);
 
-    if (pathCoords.length < 2) return;
+    if (pathCoords.length < 2) return false;
 
     const routeDrawnSource = map.getSource('edges-route-drawn-source');
     const thisPickupId = activePickupIdRef.current;
@@ -2029,6 +2041,7 @@ export default function MapCanvas({
     };
 
     carAnimFrameRef.current = requestAnimationFrame(stepDrive);
+    return true;
   }, [ensureGraphLayers, setCarLights]);
 
   // Automatic Car Drive Trigger on route_confirm & Instant Cleanup on tab switch / reset / prev step
@@ -2041,8 +2054,10 @@ export default function MapCanvas({
 
     if (isSinglePickupConfirm) {
       if (lastDrivenStepKeyRef.current !== currentStepKey) {
-        lastDrivenStepKeyRef.current = currentStepKey;
-        animateVehicle();
+        const started = animateVehicle();
+        if (started) {
+          lastDrivenStepKeyRef.current = currentStepKey;
+        }
       }
     } else {
       // Clear/hide the car marker immediately whenever switching pickup tabs, resetting, or stepping backward before route_confirm
@@ -2064,14 +2079,14 @@ export default function MapCanvas({
       setIsCarDriving(false);
 
       const map = mapRef.current;
-      if (map && map.isStyleLoaded()) {
+      if (isMapReady(map)) {
         const routeDrawnSource = map.getSource('edges-route-drawn-source');
         if (routeDrawnSource && activePickupId !== 'ALL' && activePickupId !== null) {
           routeDrawnSource.setData({ type: 'FeatureCollection', features: [] });
         }
       }
     }
-  }, [activePickupId, isConfirm, currentStepNum, activePathNodes, animateVehicle]);
+  }, [activePickupId, isConfirm, currentStepNum, activePathNodes, animateVehicle, isMapLoaded]);
 
   // 9. Instant Local Search + External Photon Geocoder (0 forbidden URLs)
   const handleSearchQueryChange = (e) => {
