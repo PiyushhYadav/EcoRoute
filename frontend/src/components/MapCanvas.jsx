@@ -21,9 +21,14 @@ import {
   unlockAudio,
   playNodeTick,
   playCarIgnition,
+  startCarIdle,
+  stopCarIdle,
   startCarHum,
   stopCarHum,
+  playCarBrake,
+  playArrivalChime,
   playCarBrakeAndArrive,
+  playEngineStop,
   stopAllSounds,
 } from '../utils/soundEngine';
 
@@ -83,10 +88,10 @@ export function getEdgePolyline(edge, uNode, vNode) {
  */
 export function slicePolylineByProgress(coords, progress) {
   if (!coords || coords.length === 0) {
-    return { partialCoords: [], tipCoord: [0, 0], angleDeg: 0 };
+    return { partialCoords: [], tipCoord: [0, 0], angleDeg: 0, bearingDeg: 0 };
   }
   if (coords.length === 1) {
-    return { partialCoords: [coords[0], coords[0]], tipCoord: coords[0], angleDeg: 0 };
+    return { partialCoords: [coords[0], coords[0]], tipCoord: coords[0], angleDeg: 0, bearingDeg: 0 };
   }
 
   // Measure cumulative aspect-corrected segment lengths
@@ -109,10 +114,13 @@ export function slicePolylineByProgress(coords, progress) {
   const p0 = coords[0];
   const p1 = coords[1];
   const initialLatRad = ((p0[1] + p1[1]) / 2) * (Math.PI / 180);
-  const initialAngle = -Math.atan2(p1[1] - p0[1], (p1[0] - p0[0]) * Math.cos(initialLatRad)) * (180 / Math.PI);
+  const initialDx = (p1[0] - p0[0]) * Math.cos(initialLatRad);
+  const initialDy = p1[1] - p0[1];
+  const initialAngle = -Math.atan2(initialDy, initialDx) * (180 / Math.PI);
+  const initialBearing = Math.atan2(initialDx, initialDy) * (180 / Math.PI);
 
   if (totalLength < 1e-9) {
-    return { partialCoords: [coords[0], coords[0]], tipCoord: coords[0], angleDeg: initialAngle };
+    return { partialCoords: [coords[0], coords[0]], tipCoord: coords[0], angleDeg: initialAngle, bearingDeg: initialBearing };
   }
 
   const clampedProgress = Math.max(0, Math.min(1, progress));
@@ -122,6 +130,7 @@ export function slicePolylineByProgress(coords, progress) {
       partialCoords: [coords[0], coords[0]],
       tipCoord: coords[0],
       angleDeg: initialAngle,
+      bearingDeg: initialBearing,
     };
   }
 
@@ -129,11 +138,15 @@ export function slicePolylineByProgress(coords, progress) {
     const pPrev = coords[coords.length - 2];
     const pNext = coords[coords.length - 1];
     const finalLatRad = ((pPrev[1] + pNext[1]) / 2) * (Math.PI / 180);
-    const finalAngle = -Math.atan2(pNext[1] - pPrev[1], (pNext[0] - pPrev[0]) * Math.cos(finalLatRad)) * (180 / Math.PI);
+    const finalDx = (pNext[0] - pPrev[0]) * Math.cos(finalLatRad);
+    const finalDy = pNext[1] - pPrev[1];
+    const finalAngle = -Math.atan2(finalDy, finalDx) * (180 / Math.PI);
+    const finalBearing = Math.atan2(finalDx, finalDy) * (180 / Math.PI);
     return {
       partialCoords: coords.slice(),
       tipCoord: pNext,
       angleDeg: finalAngle,
+      bearingDeg: finalBearing,
     };
   }
 
@@ -159,7 +172,10 @@ export function slicePolylineByProgress(coords, progress) {
   const tipCoord = [curLng, curLat];
 
   const midLatRad = ((pPrev[1] + pNext[1]) / 2) * (Math.PI / 180);
-  const angleDeg = -Math.atan2(pNext[1] - pPrev[1], (pNext[0] - pPrev[0]) * Math.cos(midLatRad)) * (180 / Math.PI);
+  const segDx = (pNext[0] - pPrev[0]) * Math.cos(midLatRad);
+  const segDy = pNext[1] - pPrev[1];
+  const angleDeg = -Math.atan2(segDy, segDx) * (180 / Math.PI);
+  const bearingDeg = Math.atan2(segDx, segDy) * (180 / Math.PI);
 
   const partialCoords = coords.slice(0, segIdx + 1);
   partialCoords.push(tipCoord);
@@ -171,6 +187,7 @@ export function slicePolylineByProgress(coords, progress) {
     partialCoords,
     tipCoord,
     angleDeg,
+    bearingDeg,
   };
 }
 
@@ -286,54 +303,63 @@ const RECYCLE_SVG_12PX_WHITE = `
   </svg>
 `;
 
-// Iconic Mr. Bean Lime-Green Mini Cooper with Matte-Black Hood SVG + Dynamic Reactive Lighting
+// Iconic Mr. Bean Lime-Green Mini Cooper with Matte-Black Hood SVG + Dynamic Reactive Lighting + 2.5D Depth
 const MR_BEAN_MINI_COOPER_HTML = `
   <div id="eco-mr-bean-mini" style="
-    width: 72px;
-    height: 36px;
+    width: 76px;
+    height: 40px;
     display: flex;
     align-items: center;
     justify-content: center;
     transition: none !important;
     will-change: transform;
     pointer-events: none;
+    overflow: visible;
   ">
-    <svg width="72" height="36" viewBox="-18 -8 72 36" fill="none" xmlns="http://www.w3.org/2000/svg" style="display: block; overflow: visible; filter: drop-shadow(0 2.5px 4.5px rgba(15,23,42,0.38)); pointer-events: none;">
+    <svg width="76" height="40" viewBox="-20 -10 76 40" fill="none" xmlns="http://www.w3.org/2000/svg" style="display: block; overflow: visible; pointer-events: none;">
       <defs>
-        <!-- Front Headlight Beams: Warm-yellow (#FEF08A -> transparent) projecting ~22px forward -->
+        <!-- Soft Ground Drop-Shadow Blur Filter for 2.5D Pitched Depth -->
+        <filter id="mini-ground-shadow" x="-30%" y="-30%" width="160%" height="160%">
+          <feGaussianBlur stdDeviation="2.2" />
+        </filter>
+
+        <!-- Front Headlight Beams: Warm-yellow (#FEF08A -> transparent) projecting ~24px forward -->
         <linearGradient id="mini-headlight-grad" x1="0%" y1="0%" x2="100%" y2="0%">
-          <stop offset="0%" stop-color="#FEF08A" stop-opacity="0.85" />
-          <stop offset="30%" stop-color="#FEF08A" stop-opacity="0.5" />
-          <stop offset="70%" stop-color="#FEF08A" stop-opacity="0.18" />
+          <stop offset="0%" stop-color="#FEF08A" stop-opacity="0.88" />
+          <stop offset="28%" stop-color="#FEF08A" stop-opacity="0.55" />
+          <stop offset="68%" stop-color="#FEF08A" stop-opacity="0.18" />
           <stop offset="100%" stop-color="#FEF08A" stop-opacity="0" />
         </linearGradient>
 
         <!-- Rear Brake Light Soft Outer Blooms -->
         <radialGradient id="mini-brake-bloom-top" cx="2.2" cy="5.2" r="7" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stop-color="#EF4444" stop-opacity="0.85" />
-          <stop offset="50%" stop-color="#EF4444" stop-opacity="0.35" />
+          <stop offset="0%" stop-color="#EF4444" stop-opacity="0.88" />
+          <stop offset="50%" stop-color="#EF4444" stop-opacity="0.38" />
           <stop offset="100%" stop-color="#EF4444" stop-opacity="0" />
         </radialGradient>
         <radialGradient id="mini-brake-bloom-bot" cx="2.2" cy="14.8" r="7" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stop-color="#EF4444" stop-opacity="0.85" />
-          <stop offset="50%" stop-color="#EF4444" stop-opacity="0.35" />
+          <stop offset="0%" stop-color="#EF4444" stop-opacity="0.88" />
+          <stop offset="50%" stop-color="#EF4444" stop-opacity="0.38" />
           <stop offset="100%" stop-color="#EF4444" stop-opacity="0" />
         </radialGradient>
       </defs>
 
-      <!-- Front Headlight Beams (Dynamic: 2 soft warm-yellow light cones projecting ~22px forward) -->
-      <g class="car-headlights" style="opacity: 0; transition: opacity 220ms ease-in-out; pointer-events: none;">
-        <!-- Upper cone (from cx=32, cy=5 projecting ~22px to x=54) -->
-        <polygon points="32,4.2 54,0.5 54,9.5 32,5.8" fill="url(#mini-headlight-grad)" />
-        <!-- Lower cone (from cx=32, cy=15 projecting ~22px to x=54) -->
-        <polygon points="32,14.2 54,10.5 54,19.5 32,15.8" fill="url(#mini-headlight-grad)" />
+      <!-- 2.5D Soft Offset Ground Drop-Shadow beneath the chassis -->
+      <ellipse cx="17.5" cy="11.8" rx="17" ry="9.5" fill="rgba(15, 23, 42, 0.32)" filter="url(#mini-ground-shadow)" />
+
+      <!-- Front Headlight Beams (Dynamic: 2 soft warm-yellow light cones projecting ~24px forward) -->
+      <g class="car-headlights" style="opacity: 0; pointer-events: none;">
+        <!-- Upper cone (from cx=32, cy=5 projecting ~24px to x=56) -->
+        <polygon points="32,4.2 56,0.2 56,9.8 32,5.8" fill="url(#mini-headlight-grad)" />
+        <!-- Lower cone (from cx=32, cy=15 projecting ~24px to x=56) -->
+        <polygon points="32,14.2 56,10.2 56,19.8 32,15.8" fill="url(#mini-headlight-grad)" />
         <!-- High-intensity illuminated bulb cores -->
         <circle cx="32" cy="5" r="1.6" fill="#FFFFFF" />
         <circle cx="32" cy="15" r="1.6" fill="#FFFFFF" />
       </g>
 
       <!-- Rear Brake Lights (Dynamic: crisp glowing crimson taillights with soft red outer bloom) -->
-      <g class="car-brakelights" style="opacity: 0; transition: opacity 180ms ease-in-out; pointer-events: none;">
+      <g class="car-brakelights" style="opacity: 0; pointer-events: none;">
         <!-- Soft red outer blooms -->
         <circle cx="2.2" cy="5.2" r="7" fill="url(#mini-brake-bloom-top)" />
         <circle cx="2.2" cy="14.8" r="7" fill="url(#mini-brake-bloom-bot)" />
@@ -342,38 +368,54 @@ const MR_BEAN_MINI_COOPER_HTML = `
         <rect x="1.5" y="13.4" width="1.8" height="2.8" rx="0.7" fill="#EF4444" stroke="#FCA5A5" stroke-width="0.5" />
       </g>
 
-      <!-- 4 Compact Black Wheels -->
-      <rect x="5" y="0.5" width="6.5" height="2.5" rx="1.2" fill="#0F172A" />
-      <rect x="5" y="17" width="6.5" height="2.5" rx="1.2" fill="#0F172A" />
-      <rect x="23" y="0.5" width="6.5" height="2.5" rx="1.2" fill="#0F172A" />
-      <rect x="23" y="17" width="6.5" height="2.5" rx="1.2" fill="#0F172A" />
+      <!-- 3-Circle Exhaust Puffs behind rear tailpipe -->
+      <g class="car-exhaust-group" style="pointer-events: none;">
+        <circle class="exhaust-puff puff-1" cx="0.5" cy="14" r="1.6" fill="rgba(148,163,184,0.55)" />
+        <circle class="exhaust-puff puff-2" cx="-3" cy="13.5" r="2.2" fill="rgba(148,163,184,0.45)" />
+        <circle class="exhaust-puff puff-3" cx="-6.8" cy="13" r="3" fill="rgba(148,163,184,0.35)" />
+      </g>
 
-      <!-- Side Mirrors -->
-      <rect x="20.5" y="0" width="1.8" height="1.8" rx="0.9" fill="#1E293B" />
-      <rect x="20.5" y="18.2" width="1.8" height="1.8" rx="0.9" fill="#1E293B" />
+      <!-- Car Rumble Group (subject to engine-rumble during Phase 1 & 3) -->
+      <g class="car-rumble-group" style="transform-origin: 18px 10px;">
+        <!-- 4 Compact Black Wheels -->
+        <rect x="5" y="0.5" width="6.5" height="2.5" rx="1.2" fill="#0F172A" />
+        <rect x="5" y="17" width="6.5" height="2.5" rx="1.2" fill="#0F172A" />
+        <rect x="23" y="0.5" width="6.5" height="2.5" rx="1.2" fill="#0F172A" />
+        <rect x="23" y="17" width="6.5" height="2.5" rx="1.2" fill="#0F172A" />
 
-      <!-- Main Boxy Mini Cooper Body (Lime Green with subtle #4D7C0F outline) -->
-      <rect x="2.5" y="2" width="31" height="16" rx="3.5" fill="#84CC16" stroke="#4D7C0F" stroke-width="1.2" />
+        <!-- Side Mirrors -->
+        <rect x="20.5" y="0" width="1.8" height="1.8" rx="0.9" fill="#1E293B" />
+        <rect x="20.5" y="18.2" width="1.8" height="1.8" rx="0.9" fill="#1E293B" />
 
-      <!-- Signature Matte-Black Hood (#1E293B) -->
-      <path d="M 23 2.5 H 29.5 Q 33 2.5 33 6 V 14 Q 33 17.5 29.5 17.5 H 23 Z" fill="#1E293B" />
+        <!-- Main Boxy Mini Cooper Body (Lime Green with subtle #4D7C0F outline) -->
+        <rect x="2.5" y="2" width="31" height="16" rx="3.5" fill="#84CC16" stroke="#4D7C0F" stroke-width="1.2" />
 
-      <!-- Wraparound Front Windshield (#0F172A) -->
-      <path d="M 20.5 3.5 Q 22.5 10 20.5 16.5 L 18.5 16.5 Q 20.5 10 18.5 3.5 Z" fill="#0F172A" />
+        <!-- 2.5D Body Contour Shading (Top highlight line & bottom sill shadow line) -->
+        <line x1="6" y1="2.7" x2="22" y2="2.7" stroke="#D9F99D" stroke-width="0.8" stroke-linecap="round" opacity="0.9" />
+        <line x1="6" y1="17.3" x2="22" y2="17.3" stroke="#365314" stroke-width="0.8" stroke-linecap="round" opacity="0.65" />
 
-      <!-- Lime Green Roof (#A3E635) -->
-      <rect x="8" y="4" width="10.5" height="12" rx="1.5" fill="#A3E635" />
+        <!-- Signature Matte-Black Hood (#1E293B) with subtle bevel -->
+        <path d="M 23 2.5 H 29.5 Q 33 2.5 33 6 V 14 Q 33 17.5 29.5 17.5 H 23 Z" fill="#1E293B" />
+        <path d="M 24 3.5 H 28.5 Q 31 3.5 31 5.8 V 7.2 H 24 Z" fill="#334155" opacity="0.65" />
 
-      <!-- Rear Windshield (#0F172A) -->
-      <rect x="5.5" y="4.5" width="2" height="11" rx="1" fill="#0F172A" />
+        <!-- Wraparound Front Windshield (#0F172A) -->
+        <path d="M 20.5 3.5 Q 22.5 10 20.5 16.5 L 18.5 16.5 Q 20.5 10 18.5 3.5 Z" fill="#0F172A" />
 
-      <!-- Round White/Pale Yellow Headlights (#FEF9C3) -->
-      <circle cx="32" cy="5" r="1.3" fill="#FEF9C3" stroke="#CBD5E1" stroke-width="0.5" />
-      <circle cx="32" cy="15" r="1.3" fill="#FEF9C3" stroke="#CBD5E1" stroke-width="0.5" />
+        <!-- Lime Green Roof (#A3E635) with 2.5D soft specular highlight -->
+        <rect x="8" y="4" width="10.5" height="12" rx="1.5" fill="#A3E635" />
+        <rect x="8.6" y="4.6" width="9.3" height="4.2" rx="1" fill="#D9F99D" opacity="0.45" />
 
-      <!-- Taillights -->
-      <rect x="2.2" y="4.2" width="1" height="2" rx="0.5" fill="#EF4444" />
-      <rect x="2.2" y="13.8" width="1" height="2" rx="0.5" fill="#EF4444" />
+        <!-- Rear Windshield (#0F172A) -->
+        <rect x="5.5" y="4.5" width="2" height="11" rx="1" fill="#0F172A" />
+
+        <!-- Round White/Pale Yellow Headlights (#FEF9C3) -->
+        <circle cx="32" cy="5" r="1.3" fill="#FEF9C3" stroke="#CBD5E1" stroke-width="0.5" />
+        <circle cx="32" cy="15" r="1.3" fill="#FEF9C3" stroke="#CBD5E1" stroke-width="0.5" />
+
+        <!-- Taillights -->
+        <rect x="2.2" y="4.2" width="1" height="2" rx="0.5" fill="#EF4444" />
+        <rect x="2.2" y="13.8" width="1" height="2" rx="0.5" fill="#EF4444" />
+      </g>
     </svg>
   </div>
 `;
@@ -589,16 +631,44 @@ export default function MapCanvas({
   const carAnimFrameRef = useRef(null);
   const lastDrivenStepKeyRef = useRef(null);
   const arrivalTimeoutRef = useRef(null);
+  const ignitionTimeoutRef = useRef(null);
+  const idleSoundTimeoutRef = useRef(null);
+  const coolDownTimeoutRef = useRef(null);
+  const arrivalBrakeTimeoutRef = useRef(null);
+  const finishCallbackTimeoutRef = useRef(null);
+  const isFocusModeRef = useRef(false);
+  const focusEndpointsRef = useRef({ startId: null, endId: null });
+  const cameraBearingRef = useRef(0);
+  const telemetryPillRef = useRef(null);
 
-  // Helper to toggle Mr. Bean's Mini Cooper headlights and brake lights with zero React re-renders
-  const setCarLights = useCallback((headlightsOn, brakeLightsOn) => {
+  // Helper to update car visual states (headlights, brakelights, engine rumble, exhaust puffs)
+  const setCarState = useCallback(({ headlights, brakelights, rumble, puffing } = {}) => {
     const el = carMarkerRef.current?.getElement();
     if (!el) return;
     const hl = el.querySelector('.car-headlights');
     const bl = el.querySelector('.car-brakelights');
-    if (hl) hl.style.opacity = headlightsOn ? '1' : '0';
-    if (bl) bl.style.opacity = brakeLightsOn ? '1' : '0';
+    const rumbleGroup = el.querySelector('.car-rumble-group');
+    if (hl && headlights != null) hl.style.opacity = headlights ? '1' : '0';
+    if (bl && brakelights != null) bl.style.opacity = brakelights ? '1' : '0';
+    if (rumbleGroup && rumble != null) {
+      if (rumble) {
+        rumbleGroup.classList.add('car-rumble-active');
+      } else {
+        rumbleGroup.classList.remove('car-rumble-active');
+      }
+    }
+    if (puffing != null) {
+      if (puffing) {
+        el.classList.add('car-puffing');
+      } else {
+        el.classList.remove('car-puffing');
+      }
+    }
   }, []);
+
+  const setCarLights = useCallback((headlightsOn, brakeLightsOn) => {
+    setCarState({ headlights: headlightsOn, brakelights: brakeLightsOn });
+  }, [setCarState]);
 
   // Markers references
   const nodeMarkersRef = useRef({});
@@ -804,6 +874,8 @@ export default function MapCanvas({
       targetMap.fitBounds(bounds, {
         padding: { top: 145, bottom: 70, left: 72, right: 72 },
         maxZoom: 12.5,
+        pitch: 0,
+        bearing: 0,
         duration,
       });
     }
@@ -843,6 +915,7 @@ export default function MapCanvas({
           'line-color': '#FFFFFF',
           'line-width': 4.0,
           'line-opacity': 0.9,
+          'line-opacity-transition': { duration: 350, delay: 0 },
         },
       });
     }
@@ -859,6 +932,7 @@ export default function MapCanvas({
           'line-color': '#94A3B8',
           'line-width': 1.8,
           'line-opacity': 0.68,
+          'line-opacity-transition': { duration: 350, delay: 0 },
         },
       });
     }
@@ -884,6 +958,7 @@ export default function MapCanvas({
           'line-width': 2.2,
           'line-dasharray': [1.4, 2.0],
           'line-opacity': 0.8,
+          'line-opacity-transition': { duration: 350, delay: 0 },
         },
       });
     }
@@ -907,6 +982,8 @@ export default function MapCanvas({
         paint: {
           'line-color': '#0F172A',
           'line-width': 3.2,
+          'line-opacity': 1.0,
+          'line-opacity-transition': { duration: 350, delay: 0 },
         },
       });
     }
@@ -931,6 +1008,8 @@ export default function MapCanvas({
           'line-color': '#EF4444',
           'line-width': 2.4,
           'line-dasharray': [2, 2],
+          'line-opacity': 1.0,
+          'line-opacity-transition': { duration: 350, delay: 0 },
         },
       });
     }
@@ -954,6 +1033,8 @@ export default function MapCanvas({
         paint: {
           'line-color': '#0F172A',
           'line-width': 3.8,
+          'line-opacity': 1.0,
+          'line-opacity-transition': { duration: 350, delay: 0 },
         },
       });
     }
@@ -976,7 +1057,8 @@ export default function MapCanvas({
         },
         paint: {
           'line-color': '#FFFFFF',
-          'line-width': 6.8,
+          'line-width': 7.2,
+          'line-opacity': 1.0,
         },
       });
     }
@@ -991,7 +1073,8 @@ export default function MapCanvas({
         },
         paint: {
           'line-color': '#059669',
-          'line-width': 4.2,
+          'line-width': 4.5,
+          'line-opacity': 1.0,
         },
       });
     }
@@ -1297,8 +1380,34 @@ export default function MapCanvas({
         clearTimeout(arrivalTimeoutRef.current);
         arrivalTimeoutRef.current = null;
       }
+      if (ignitionTimeoutRef.current) {
+        clearTimeout(ignitionTimeoutRef.current);
+        ignitionTimeoutRef.current = null;
+      }
+      if (idleSoundTimeoutRef.current) {
+        clearTimeout(idleSoundTimeoutRef.current);
+        idleSoundTimeoutRef.current = null;
+      }
+      if (coolDownTimeoutRef.current) {
+        clearTimeout(coolDownTimeoutRef.current);
+        coolDownTimeoutRef.current = null;
+      }
+      if (arrivalBrakeTimeoutRef.current) {
+        clearTimeout(arrivalBrakeTimeoutRef.current);
+        arrivalBrakeTimeoutRef.current = null;
+      }
+      if (finishCallbackTimeoutRef.current) {
+        clearTimeout(finishCallbackTimeoutRef.current);
+        finishCallbackTimeoutRef.current = null;
+      }
       stopAllSounds();
       setCarLights(false, false);
+      if (mapContainerRef.current) {
+        mapContainerRef.current.classList.remove('car-focus-active');
+      }
+      if (outerContainerRef.current) {
+        outerContainerRef.current.classList.remove('car-focus-active');
+      }
       if (carMarkerRef.current) {
         carMarkerRef.current.remove();
         carMarkerRef.current = null;
@@ -1371,7 +1480,7 @@ export default function MapCanvas({
       let marker = currentPills[edge.id];
       if (!marker) {
         const rootEl = document.createElement('div');
-        rootEl.className = 'midpoint-pill-wrapper';
+        rootEl.className = 'midpoint-pill-wrapper eco-edge-pill';
         rootEl.style.cursor = 'pointer';
         rootEl.style.zIndex = '5'; // Keep below node pins (z-index: 20)
 
@@ -1390,6 +1499,7 @@ export default function MapCanvas({
       }
 
       const pillEl = marker.getElement();
+      pillEl.classList.add('eco-edge-pill');
       pillEl.onclick = (e) => {
         e.stopPropagation();
         onSelectEdgeRef.current(edge);
@@ -1399,13 +1509,13 @@ export default function MapCanvas({
       if (isBlocked) {
         pillClass = 'bg-rose-50 border-rose-300 text-rose-700 font-bold';
       } else if (isRoute) {
-        pillClass = 'bg-emerald-600 border-emerald-600 text-white font-bold shadow-xs';
+        pillClass = 'bg-emerald-600 border-emerald-600 text-white shadow-2xs';
       } else if (isActiveRelaxation) {
         pillClass = 'bg-amber-500 border-amber-500 text-white font-bold scale-105 shadow-xs';
       }
 
       pillEl.innerHTML = `
-        <div class="px-1.5 py-0.5 rounded-full text-[10px] font-medium whitespace-nowrap border transition-all edge-cost-pill ${pillClass}" style="font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums;">
+        <div class="text-[10px] font-mono font-semibold leading-none px-1.5 py-0.5 rounded-full whitespace-nowrap border transition-all edge-cost-pill eco-edge-pill ${pillClass}" style="font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums;">
           ${displayCost}
         </div>
       `;
@@ -1464,7 +1574,7 @@ export default function MapCanvas({
         const rounded = Math.round(Number(dist) * 10) / 10;
         const numStr = Number.isInteger(rounded) ? `${rounded}` : rounded.toFixed(1);
         const unit = metric === 'time' ? 'm' : 'km';
-        distBadge = `<div class="mb-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-mono bg-white/95 border border-slate-200/90 text-slate-700 shadow-2xs edge-cost-pill leading-none pointer-events-none select-none" style="font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; pointer-events: none;">${numStr}${unit}</div>`;
+        distBadge = `<div class="eco-cost-chip mb-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-mono bg-white/95 border border-slate-200/90 text-slate-700 shadow-2xs edge-cost-pill leading-none pointer-events-none select-none" style="font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; pointer-events: none;">${numStr}${unit}</div>`;
       }
 
       // Centre Decision Badges during Greedy evaluation and confirmation steps
@@ -1494,16 +1604,16 @@ export default function MapCanvas({
         if (isGreedyOrConfirm) {
           if (step.event_type === 'route_confirm' && isWinningAssignedDestination) {
             // Winning assigned destination on route_confirm must ALWAYS display green Assigned, never red Capacity Full
-            greedyBadge = `<div class="mt-0.5 pointer-events-none select-none"><span class="bg-emerald-600 text-white px-1.5 py-0.5 rounded-full text-[9px] font-bold shadow-2xs leading-none pointer-events-none select-none">Assigned</span></div>`;
+            greedyBadge = `<div class="eco-status-badge mt-0.5 pointer-events-none select-none"><span class="bg-emerald-600 text-white px-1.5 py-0.5 rounded-full text-[9px] font-bold shadow-2xs leading-none pointer-events-none select-none">Assigned</span></div>`;
           } else if (check) {
             if (isAssignedCentre) {
-              greedyBadge = `<div class="mt-0.5 pointer-events-none select-none"><span class="bg-emerald-600 text-white px-1.5 py-0.5 rounded-full text-[9px] font-bold shadow-2xs leading-none pointer-events-none select-none">Assigned</span></div>`;
+              greedyBadge = `<div class="eco-status-badge mt-0.5 pointer-events-none select-none"><span class="bg-emerald-600 text-white px-1.5 py-0.5 rounded-full text-[9px] font-bold shadow-2xs leading-none pointer-events-none select-none">Assigned</span></div>`;
             } else if (check.status_badge === 'capacity_full' || (check.reason && check.reason.toLowerCase().includes('capacity'))) {
-              greedyBadge = `<div class="mt-0.5 pointer-events-none select-none"><span class="bg-rose-600 text-white px-1.5 py-0.5 rounded-full text-[9px] font-bold shadow-2xs leading-none pointer-events-none select-none">Capacity Full</span></div>`;
+              greedyBadge = `<div class="eco-status-badge mt-0.5 pointer-events-none select-none"><span class="bg-rose-600 text-white px-1.5 py-0.5 rounded-full text-[9px] font-bold shadow-2xs leading-none pointer-events-none select-none">Capacity Full</span></div>`;
             } else if (check.status_badge === 'wrong_category' || (check.reason && check.reason.toLowerCase().includes('category'))) {
-              greedyBadge = `<div class="mt-0.5 pointer-events-none select-none"><span class="bg-amber-600 text-white px-1.5 py-0.5 rounded-full text-[9px] font-bold shadow-2xs leading-none pointer-events-none select-none">Wrong Type</span></div>`;
+              greedyBadge = `<div class="eco-status-badge mt-0.5 pointer-events-none select-none"><span class="bg-amber-600 text-white px-1.5 py-0.5 rounded-full text-[9px] font-bold shadow-2xs leading-none pointer-events-none select-none">Wrong Type</span></div>`;
             } else if (check.reason && check.reason.toLowerCase().includes('blocked')) {
-              greedyBadge = `<div class="mt-0.5 pointer-events-none select-none"><span class="bg-rose-600 text-white px-1.5 py-0.5 rounded-full text-[9px] font-bold shadow-2xs leading-none pointer-events-none select-none">Blocked</span></div>`;
+              greedyBadge = `<div class="eco-status-badge mt-0.5 pointer-events-none select-none"><span class="bg-rose-600 text-white px-1.5 py-0.5 rounded-full text-[9px] font-bold shadow-2xs leading-none pointer-events-none select-none">Blocked</span></div>`;
             }
           }
         }
@@ -1512,7 +1622,8 @@ export default function MapCanvas({
       let marker = currentMarkers[node.id];
       if (!marker) {
         const rootEl = document.createElement('div');
-        rootEl.className = 'node-marker-wrapper';
+        rootEl.className = 'node-marker-wrapper eco-node-marker';
+        rootEl.setAttribute('data-node-id', node.id);
         rootEl.style.zIndex = isPopped ? '20' : '10'; // Keep inside map container (<= 10, hovered/popped: 20)
         rootEl.style.pointerEvents = 'none';
 
@@ -1531,6 +1642,19 @@ export default function MapCanvas({
       }
 
       const el = marker.getElement();
+      el.classList.add('eco-node-marker');
+      el.setAttribute('data-node-id', node.id);
+      if (isFocusModeRef.current) {
+        const { startId, endId } = focusEndpointsRef.current;
+        if (node.id === startId || node.id === endId) {
+          el.setAttribute('data-focus-keep', 'true');
+        } else {
+          el.removeAttribute('data-focus-keep');
+        }
+      } else {
+        el.removeAttribute('data-focus-keep');
+      }
+
       el.style.opacity = String(nodeOpacity);
       el.style.pointerEvents = 'none';
 
@@ -1666,17 +1790,50 @@ export default function MapCanvas({
       // Clean Single-Line Haloed Labels directly below each node
       const labelText = getNodeDisplayLabel(node);
 
-      el.innerHTML = `
-        <div class="relative flex flex-col items-center select-none pointer-events-none">
-          ${isConnectSource ? `<div class="absolute -inset-2 rounded-full bg-amber-400/35 animate-pulse pointer-events-none"></div>` : ''}
-          ${distBadge}
-          <div class="node-hit-target" style="width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; pointer-events: auto; cursor: pointer;">
+      if (nodeKind === 'centre') {
+        const isR3 = node.id === 'R3';
+        const labelAndBadgeHtml = isR3
+          ? `
+            <div style="position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(100% + 4px); white-space: nowrap; pointer-events: none; display: flex; flex-direction: column; align-items: center;">
+              ${distBadge}
+              <div class="map-halo-label pointer-events-none select-none">${labelText}</div>
+              ${greedyBadge}
+            </div>
+          `
+          : `
+            ${distBadge ? `<div style="position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(100% + 3px); white-space: nowrap; pointer-events: none;">${distBadge}</div>` : ''}
+            <div style="position: absolute; left: 50%; transform: translateX(-50%); top: calc(100% + 3px); white-space: nowrap; pointer-events: none; display: flex; flex-direction: column; align-items: center;">
+              <div class="map-halo-label pointer-events-none select-none">${labelText}</div>
+              ${greedyBadge}
+            </div>
+          `;
+
+        el.style.width = '24px';
+        el.style.height = '24px';
+
+        el.innerHTML = `
+          <div class="node-hit-target" style="position: relative; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; pointer-events: auto; cursor: pointer;">
+            ${isConnectSource ? `<div class="absolute -inset-2 rounded-full bg-amber-400/35 animate-pulse pointer-events-none"></div>` : ''}
             ${pinHtml}
+            ${labelAndBadgeHtml}
           </div>
-          <div class="map-halo-label mt-0.5 pointer-events-none select-none">${labelText}</div>
-          ${greedyBadge}
-        </div>
-      `;
+        `;
+      } else {
+        el.style.width = '';
+        el.style.height = '';
+
+        el.innerHTML = `
+          <div class="relative flex flex-col items-center select-none pointer-events-none">
+            ${isConnectSource ? `<div class="absolute -inset-2 rounded-full bg-amber-400/35 animate-pulse pointer-events-none"></div>` : ''}
+            ${distBadge}
+            <div class="node-hit-target" style="width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; pointer-events: auto; cursor: pointer;">
+              ${pinHtml}
+            </div>
+            <div class="map-halo-label mt-0.5 pointer-events-none select-none">${labelText}</div>
+            ${greedyBadge}
+          </div>
+        `;
+      }
 
       const hitTarget = el.querySelector('.node-hit-target');
       if (hitTarget) {
@@ -1942,10 +2099,183 @@ export default function MapCanvas({
     };
   }, [step, nodesMap, ensureGraphLayers, updateAllEdgeSources, easeInOutCubic]);
 
-  // 9. Automatic Vehicle Drive Engine (Mr. Bean Lime-Green Mini Cooper)
+  // 9. Automatic Vehicle Drive Engine (Mr. Bean Lime-Green Mini Cooper & 2.5D Spotlight Focus Mode)
   const activePickupIdRef = useRef(activePickupId);
   activePickupIdRef.current = activePickupId;
 
+  // Spotlight Focus Mode: Dim background network & tilt camera into 2.5D perspective
+  const enterFocusMode = useCallback((pickupNodeId, centreNodeId, fullRouteCoords) => {
+    const map = mapRef.current;
+    if (!isMapReady(map)) return;
+
+    isFocusModeRef.current = true;
+    focusEndpointsRef.current = { startId: pickupNodeId, endId: centreNodeId };
+
+    // 1. Mark ONLY those two endpoint DOM markers (startId and endId) with data-focus-keep="true"
+    Object.entries(nodeMarkersRef.current).forEach(([nodeId, marker]) => {
+      const el = marker.getElement();
+      if (!el) return;
+      if (nodeId === pickupNodeId || nodeId === centreNodeId) {
+        el.setAttribute('data-focus-keep', 'true');
+      } else {
+        el.removeAttribute('data-focus-keep');
+      }
+    });
+
+    // 2. Add class car-focus-active to the map container div
+    if (mapContainerRef.current) {
+      mapContainerRef.current.classList.add('car-focus-active');
+    }
+    if (outerContainerRef.current) {
+      outerContainerRef.current.classList.add('car-focus-active');
+    }
+
+    // 3. Set paint line-opacity to 0 on all non-route MapLibre line layers
+    const lineLayersToFade = [
+      'edges-base',
+      'edges-casing',
+      'edges-spt',
+      'edges-rejected',
+      'edges-blocked',
+      'edges-traversing',
+    ];
+    lineLayersToFade.forEach((id) => {
+      if (map.getLayer(id)) {
+        map.setPaintProperty(id, 'line-opacity', 0);
+      }
+    });
+
+    if (map.getLayer('edges-route-casing')) {
+      map.setPaintProperty('edges-route-casing', 'line-opacity', 1);
+    }
+    if (map.getLayer('edges-route-drawn')) {
+      map.setPaintProperty('edges-route-drawn', 'line-opacity', 1);
+    }
+
+    // 4. Smooth 2.5D Chase Camera swoop to start node in chase position
+    if (fullRouteCoords && fullRouteCoords.length >= 2) {
+      const startSlice = slicePolylineByProgress(fullRouteCoords, 0);
+      cameraBearingRef.current = startSlice.bearingDeg;
+
+      map.easeTo({
+        center: fullRouteCoords[0],
+        pitch: 45,
+        bearing: startSlice.bearingDeg,
+        zoom: 14.5,
+        duration: 900,
+      });
+    }
+  }, []);
+
+  // Exit Focus Mode: Smoothly restore camera back to top-down (pitch: 0, bearing: 0) and restore 100% network visibility
+  const exitFocusMode = useCallback(
+    (duration = 550) => {
+      const map = mapRef.current;
+      isFocusModeRef.current = false;
+      focusEndpointsRef.current = { startId: null, endId: null };
+
+      // Remove car-focus-active class
+      if (mapContainerRef.current) {
+        mapContainerRef.current.classList.remove('car-focus-active');
+      }
+      if (outerContainerRef.current) {
+        outerContainerRef.current.classList.remove('car-focus-active');
+      }
+
+      // Remove data-focus-keep from all node markers
+      Object.values(nodeMarkersRef.current).forEach((marker) => {
+        const el = marker.getElement();
+        if (el) {
+          el.removeAttribute('data-focus-keep');
+        }
+      });
+
+      // Fade out telemetry pill cleanly
+      if (telemetryPillRef.current) {
+        telemetryPillRef.current.style.opacity = '0';
+        telemetryPillRef.current.style.transform = 'translate(-50%, 12px)';
+        setTimeout(() => {
+          if (telemetryPillRef.current && !isFocusModeRef.current) {
+            telemetryPillRef.current.style.display = 'none';
+          }
+        }, 300);
+      }
+
+      // Clean up arrival ripple if attached
+      const existingRipples = document.querySelectorAll('.centre-arrival-ripple');
+      existingRipples.forEach((r) => r.remove());
+
+      // Restore line layers back to 100% visibility
+      if (isMapReady(map)) {
+        const defaultOpacities = {
+          'edges-base': 0.68,
+          'edges-casing': 0.9,
+          'edges-spt': 1.0,
+          'edges-rejected': 0.8,
+          'edges-blocked': 1.0,
+          'edges-traversing': 1.0,
+        };
+        Object.entries(defaultOpacities).forEach(([id, opacity]) => {
+          if (map.getLayer(id)) {
+            map.setPaintProperty(id, 'line-opacity', opacity);
+          }
+        });
+
+        // Smoothly restore camera back to pitch: 0, bearing: 0 and fit all nodes
+        fitAllNodes(map, duration || 750);
+      }
+    },
+    [fitAllNodes]
+  );
+
+  // Bulletproof cleanup for vehicle animation, audio, and camera state
+  const cleanupVehicleAndFocusMode = useCallback(() => {
+    if (ignitionTimeoutRef.current) {
+      clearTimeout(ignitionTimeoutRef.current);
+      ignitionTimeoutRef.current = null;
+    }
+    if (idleSoundTimeoutRef.current) {
+      clearTimeout(idleSoundTimeoutRef.current);
+      idleSoundTimeoutRef.current = null;
+    }
+    if (coolDownTimeoutRef.current) {
+      clearTimeout(coolDownTimeoutRef.current);
+      coolDownTimeoutRef.current = null;
+    }
+    if (arrivalBrakeTimeoutRef.current) {
+      clearTimeout(arrivalBrakeTimeoutRef.current);
+      arrivalBrakeTimeoutRef.current = null;
+    }
+    if (finishCallbackTimeoutRef.current) {
+      clearTimeout(finishCallbackTimeoutRef.current);
+      finishCallbackTimeoutRef.current = null;
+    }
+    if (carAnimFrameRef.current) {
+      cancelAnimationFrame(carAnimFrameRef.current);
+      carAnimFrameRef.current = null;
+    }
+
+    stopAllSounds();
+
+    if (carMarkerRef.current) {
+      setCarState({ headlights: false, brakelights: false, rumble: false, puffing: false });
+      carMarkerRef.current.remove();
+      carMarkerRef.current = null;
+    }
+
+    setIsCarDriving(false);
+    exitFocusMode(400);
+
+    const map = mapRef.current;
+    if (isMapReady(map)) {
+      const routeDrawnSource = map.getSource('edges-route-drawn-source');
+      if (routeDrawnSource && activePickupIdRef.current !== 'ALL' && activePickupIdRef.current !== null) {
+        routeDrawnSource.setData({ type: 'FeatureCollection', features: [] });
+      }
+    }
+  }, [exitFocusMode, setCarState]);
+
+  // Main 3-Phase Vehicle Animation Engine
   const animateVehicle = useCallback(() => {
     const map = mapRef.current;
     if (!isMapReady(map)) return false;
@@ -1986,20 +2316,69 @@ export default function MapCanvas({
 
     const routeDrawnSource = map.getSource('edges-route-drawn-source');
     const thisPickupId = activePickupIdRef.current;
+    const startNodeId = currentPathNodes[0];
+    const destNodeId = currentPathNodes[currentPathNodes.length - 1];
 
-    if (arrivalTimeoutRef.current) {
-      clearTimeout(arrivalTimeoutRef.current);
-      arrivalTimeoutRef.current = null;
+    // Clear previous timeouts & rAF cleanly
+    if (ignitionTimeoutRef.current) {
+      clearTimeout(ignitionTimeoutRef.current);
+      ignitionTimeoutRef.current = null;
     }
-
+    if (idleSoundTimeoutRef.current) {
+      clearTimeout(idleSoundTimeoutRef.current);
+      idleSoundTimeoutRef.current = null;
+    }
+    if (coolDownTimeoutRef.current) {
+      clearTimeout(coolDownTimeoutRef.current);
+      coolDownTimeoutRef.current = null;
+    }
+    if (arrivalBrakeTimeoutRef.current) {
+      clearTimeout(arrivalBrakeTimeoutRef.current);
+      arrivalBrakeTimeoutRef.current = null;
+    }
+    if (finishCallbackTimeoutRef.current) {
+      clearTimeout(finishCallbackTimeoutRef.current);
+      finishCallbackTimeoutRef.current = null;
+    }
     if (carAnimFrameRef.current) {
       cancelAnimationFrame(carAnimFrameRef.current);
       carAnimFrameRef.current = null;
     }
 
-    // Stop any existing hum cleanly before starting new drive
-    stopCarHum();
+    stopAllSounds();
 
+    // Node & Delivery Telemetry Data
+    const startNode = nMap[startNodeId];
+    const destNode = nMap[destNodeId];
+    const pickupName = getCleanLandmarkName(startNode) || startNodeId;
+    const destName = getCleanLandmarkName(destNode) || destNodeId;
+    const alloc = allocationsMapRef.current[thisPickupId];
+    const fallback = DEFAULT_NODE_DESTINATIONS[thisPickupId] || {};
+    const weightKg = startNode?.weight_kg ?? alloc?.weight_kg ?? fallback.weight ?? 12;
+    const wasteCategory = startNode?.waste_type ?? alloc?.waste_type ?? fallback.waste ?? 'Batteries';
+    const activeMetric = metricRef.current || 'time';
+    const unit = activeMetric === 'time' ? 'min' : 'km';
+
+    let computedCost = 0;
+    for (let i = 0; i < currentPathNodes.length - 1; i++) {
+      const u = currentPathNodes[i];
+      const v = currentPathNodes[i + 1];
+      const edge = currentEdges.find(
+        (e) => (e.source_id === u && e.target_id === v) || (e.source_id === v && e.target_id === u)
+      );
+      if (edge) {
+        if (activeMetric === 'time') {
+          computedCost += (edge.base_time_min || 0) * (edge.traffic_factor || 1.0);
+        } else {
+          computedCost += edge.base_distance_km || 0;
+        }
+      }
+    }
+    const totalCost =
+      (activeMetric === 'time' ? alloc?.total_time_min : alloc?.total_distance_km) ??
+      (computedCost > 0 ? computedCost : (activeMetric === 'time' ? fallback.time : fallback.dist) ?? 15);
+
+    // Instantiate or place Mr. Bean's Mini Cooper
     let carMarker = carMarkerRef.current;
     if (!carMarker) {
       const carEl = document.createElement('div');
@@ -2027,16 +2406,14 @@ export default function MapCanvas({
 
     setIsCarDriving(true);
 
-    // 1. Turn .car-headlights ON, turn .car-brakelights OFF, and fire playCarIgnition()
-    setCarLights(true, false);
-    playCarIgnition();
-
-    const speed = playbackSpeedRef.current || 1;
-    // 2. Start startCarHum(playbackSpeed) as the car accelerates smoothly along path_nodes
-    startCarHum(speed);
-
-    // Initialize edges-route-drawn-source at the starting point
+    // Initial slice & angle
     const startSlice = slicePolylineByProgress(fullRouteCoords, 0);
+    cameraBearingRef.current = startSlice.bearingDeg;
+    const miniInner = carMarkerRef.current?.getElement()?.querySelector('#eco-mr-bean-mini');
+    if (miniInner) {
+      miniInner.style.transform = `rotate(${startSlice.angleDeg - cameraBearingRef.current}deg)`;
+    }
+
     if (routeDrawnSource) {
       routeDrawnSource.setData({
         type: 'FeatureCollection',
@@ -2052,70 +2429,105 @@ export default function MapCanvas({
       });
     }
 
-    const miniInner = carMarkerRef.current?.getElement()?.querySelector('#eco-mr-bean-mini');
-    if (miniInner) {
-      miniInner.style.transform = `rotate(${startSlice.angleDeg}deg)`;
+    // =========================================================================
+    // PHASE 1 — Ignition & 1-Second Warm-Up (1000ms stationary at Pickup)
+    // =========================================================================
+    enterFocusMode(startNodeId, destNodeId, fullRouteCoords);
+    setCarState({ headlights: true, brakelights: false, rumble: true, puffing: true });
+    playCarIgnition();
+
+    // Settle into soft idle purr at ~480ms
+    idleSoundTimeoutRef.current = setTimeout(() => {
+      idleSoundTimeoutRef.current = null;
+      startCarIdle();
+    }, 480);
+
+    // Telemetry Pill: Phase 1 Starting engine...
+    if (telemetryPillRef.current) {
+      telemetryPillRef.current.className =
+        'telemetry-pill-container pointer-events-none select-none absolute bottom-6 left-1/2 -translate-x-1/2 z-30 bg-white/95 backdrop-blur border border-slate-200/90 shadow-lg rounded-full px-4 py-2 transition-all duration-300 text-slate-800';
+      telemetryPillRef.current.style.display = 'block';
+      void telemetryPillRef.current.offsetWidth;
+      telemetryPillRef.current.style.opacity = '1';
+      telemetryPillRef.current.style.transform = 'translate(-50%, 0)';
+      telemetryPillRef.current.innerHTML = `
+        <div class="flex items-center gap-2 text-xs font-semibold">
+          <span class="w-2.5 h-2.5 rounded-full bg-lime-500 animate-pulse shrink-0"></span>
+          <span class="text-slate-900 font-bold">${pickupName} → ${destName}</span>
+          <span class="text-slate-300">•</span>
+          <span class="text-slate-600 font-mono text-[11.5px]">Starting engine…</span>
+        </div>
+      `;
     }
 
-    let brakeTriggered = false;
-    const duration = Math.max(1200, (currentPathNodes.length - 1) * 950) / speed;
-    const startTime = performance.now();
+    // =========================================================================
+    // PHASE 2 — Slower, Smooth Cruise Along the Emerald Route
+    // =========================================================================
+    ignitionTimeoutRef.current = setTimeout(() => {
+      ignitionTimeoutRef.current = null;
 
-    const stepDrive = (currentTime) => {
-      const elapsed = currentTime - startTime;
-      const progress = Math.min(1, elapsed / duration);
+      const speed = playbackSpeedRef.current || 1;
+      const baseDuration1x = Math.max(3200, Math.min(6500, 1800 + (currentPathNodes.length - 1) * 1550));
+      const cruiseDuration = baseDuration1x / Math.max(0.5, Math.min(3, speed));
 
-      const { partialCoords, tipCoord, angleDeg } = slicePolylineByProgress(fullRouteCoords, progress);
+      // Audio transition: idle purr -> driving hum
+      stopCarIdle(0.05);
+      startCarHum(speed);
 
-      if (carMarkerRef.current) {
-        carMarkerRef.current.setLngLat(tipCoord);
+      // Stop idle rumble, keep subtle takeoff exhaust wisps
+      setCarState({ headlights: true, brakelights: false, rumble: false, puffing: true });
+
+      // Telemetry Pill: Phase 2 Countdown
+      if (telemetryPillRef.current) {
+        telemetryPillRef.current.innerHTML = `
+          <div class="flex items-center gap-2 text-xs font-semibold">
+            <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0"></span>
+            <span class="text-slate-900 font-bold">${pickupName} → ${destName}</span>
+            <span class="text-slate-300">•</span>
+            <span class="telemetry-countdown text-emerald-700 font-mono font-bold text-[11.5px]">${totalCost.toFixed(1)} ${unit} left</span>
+          </div>
+        `;
       }
 
-      const innerEl = carMarkerRef.current?.getElement()?.querySelector('#eco-mr-bean-mini');
-      if (innerEl) {
-        innerEl.style.transform = `rotate(${angleDeg}deg)`;
-      }
+      let brakeTriggered = false;
+      const cruiseStartTime = performance.now();
 
-      // Smoothly paint winning route directly behind the car in real time
-      if (routeDrawnSource) {
-        routeDrawnSource.setData({
-          type: 'FeatureCollection',
-          features: [
-            {
-              type: 'Feature',
-              geometry: {
-                type: 'LineString',
-                coordinates: partialCoords.length >= 2 ? partialCoords : [fullRouteCoords[0], tipCoord],
-              },
-            },
-          ],
-        });
-      }
+      const stepDrive = (currentTime) => {
+        const elapsed = currentTime - cruiseStartTime;
+        const rawProgress = Math.min(1, elapsed / cruiseDuration);
+        // easeInOutSine for gentle acceleration and braking
+        const progress = -(Math.cos(Math.PI * rawProgress) - 1) / 2;
 
-      // 3. At 85% of total path distance, turn .car-brakelights ON, call stopCarHum(), and fire playCarBrakeAndArrive()
-      if (progress >= 0.85 && !brakeTriggered) {
-        brakeTriggered = true;
-        setCarLights(true, true);
-        stopCarHum();
-        playCarBrakeAndArrive();
-      }
-
-      if (progress < 1) {
-        carAnimFrameRef.current = requestAnimationFrame(stepDrive);
-      } else {
-        // Physical arrival at destination recycling centre
-        carAnimFrameRef.current = null;
-        stopCarHum();
-
-        if (!brakeTriggered) {
-          brakeTriggered = true;
-          setCarLights(true, true);
-          playCarBrakeAndArrive();
+        // Dissipate exhaust puffs after initial 25% of cruise
+        if (rawProgress > 0.25) {
+          setCarState({ puffing: false });
         }
+
+        const { partialCoords, tipCoord, angleDeg, bearingDeg } = slicePolylineByProgress(fullRouteCoords, progress);
 
         if (carMarkerRef.current) {
-          carMarkerRef.current.setLngLat(fullRouteCoords[fullRouteCoords.length - 1]);
+          carMarkerRef.current.setLngLat(tipCoord);
         }
+
+        // Smooth 2.5D Chase Camera: follow Mr. Bean's Mini Cooper along its route
+        if (map && isFocusModeRef.current) {
+          // Smooth exponential dampening for camera bearing so turns feel cinematic and silky smooth
+          let diff = ((bearingDeg - cameraBearingRef.current + 540) % 360) - 180;
+          cameraBearingRef.current += diff * 0.045;
+
+          map.jumpTo({
+            center: tipCoord,
+            pitch: 45,
+            bearing: cameraBearingRef.current,
+          });
+        }
+
+        const currentInner = carMarkerRef.current?.getElement()?.querySelector('#eco-mr-bean-mini');
+        if (currentInner) {
+          currentInner.style.transform = `rotate(${angleDeg - cameraBearingRef.current}deg)`;
+        }
+
+        // Smoothly paint winning route directly behind the car in real time
         if (routeDrawnSource) {
           routeDrawnSource.setData({
             type: 'FeatureCollection',
@@ -2124,27 +2536,135 @@ export default function MapCanvas({
                 type: 'Feature',
                 geometry: {
                   type: 'LineString',
-                  coordinates: fullRouteCoords,
+                  coordinates: partialCoords.length >= 2 ? partialCoords : [fullRouteCoords[0], tipCoord],
                 },
               },
             ],
           });
         }
 
-        // 4. On arrival, keep .car-brakelights lit for ~550ms before fading lights off,
-        // then trigger onVehicleFinish(pickupId).
-        arrivalTimeoutRef.current = setTimeout(() => {
-          arrivalTimeoutRef.current = null;
-          setCarLights(false, false);
-          setIsCarDriving(false);
-          onVehicleFinishRef.current?.(thisPickupId);
-        }, 550);
-      }
-    };
+        // Live ticking countdown updated smoothly with zero React re-renders
+        if (telemetryPillRef.current) {
+          const cd = telemetryPillRef.current.querySelector('.telemetry-countdown');
+          if (cd) {
+            const remaining = Math.max(0, totalCost * (1 - progress));
+            cd.textContent = `${remaining.toFixed(1)} ${unit} left`;
+          }
+        }
 
-    carAnimFrameRef.current = requestAnimationFrame(stepDrive);
+        // At 85% of total path distance, switch rear red brake lights ON + deceleration swoosh
+        if (rawProgress >= 0.85 && !brakeTriggered) {
+          brakeTriggered = true;
+          setCarState({ headlights: true, brakelights: true, rumble: false, puffing: false });
+          stopCarHum();
+          playCarBrake();
+        }
+
+        if (rawProgress < 1) {
+          carAnimFrameRef.current = requestAnimationFrame(stepDrive);
+        } else {
+          // =========================================================================
+          // PHASE 3 — Arrival & 1-Second Engine Cool-Down (1000ms at Destination)
+          // =========================================================================
+          carAnimFrameRef.current = null;
+          stopCarHum();
+
+          if (!brakeTriggered) {
+            brakeTriggered = true;
+            playCarBrake();
+          }
+
+          if (carMarkerRef.current) {
+            carMarkerRef.current.setLngLat(fullRouteCoords[fullRouteCoords.length - 1]);
+          }
+          if (map && isFocusModeRef.current) {
+            map.jumpTo({
+              center: fullRouteCoords[fullRouteCoords.length - 1],
+              pitch: 45,
+              bearing: cameraBearingRef.current,
+            });
+          }
+          if (routeDrawnSource) {
+            routeDrawnSource.setData({
+              type: 'FeatureCollection',
+              features: [
+                {
+                  type: 'Feature',
+                  geometry: {
+                    type: 'LineString',
+                    coordinates: fullRouteCoords,
+                  },
+                },
+              ],
+            });
+          }
+
+          // Trigger Centre Arrival Ripple on destination Recycling Centre marker
+          const destMarker = nodeMarkersRef.current[destNodeId];
+          if (destMarker) {
+            const destEl = destMarker.getElement();
+            const existingRipple = destEl.querySelector('.centre-arrival-ripple');
+            if (existingRipple) existingRipple.remove();
+            const rippleEl = document.createElement('div');
+            rippleEl.className = 'centre-arrival-ripple';
+            destEl.appendChild(rippleEl);
+          }
+
+          // Play soft two-note emerald arrival chime
+          playArrivalChime();
+
+          // Settle engine into soft idle purr & rumble
+          startCarIdle();
+          setCarState({ headlights: true, brakelights: true, rumble: true, puffing: false });
+
+          // Flip Telemetry Pill to emerald Delivered state
+          if (telemetryPillRef.current) {
+            telemetryPillRef.current.className =
+              'telemetry-pill-container pointer-events-none select-none absolute bottom-6 left-1/2 -translate-x-1/2 z-30 bg-emerald-50 border border-emerald-200 text-emerald-800 shadow-lg rounded-full px-4 py-2 transition-all duration-300';
+            telemetryPillRef.current.innerHTML = `
+              <div class="flex items-center gap-2 text-xs font-bold text-emerald-900">
+                <svg class="w-4 h-4 text-emerald-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5">
+                  <polyline points="20 6 9 17 4 12"></polyline>
+                </svg>
+                <span>Delivered</span>
+                <span class="text-emerald-400 font-normal">•</span>
+                <span class="font-semibold text-emerald-700 font-mono text-[11.5px]">${weightKg} kg ${wasteCategory} Recycled</span>
+              </div>
+            `;
+          }
+
+          // Keep brake lights glowing softly for ~600ms, then turn brake lights OFF
+          arrivalBrakeTimeoutRef.current = setTimeout(() => {
+            arrivalBrakeTimeoutRef.current = null;
+            setCarState({ brakelights: false });
+          }, 600);
+
+          // Cool-down for deliberate 1000ms: shut off engine, turn lights off, exit Focus Mode
+          coolDownTimeoutRef.current = setTimeout(() => {
+            coolDownTimeoutRef.current = null;
+
+            playEngineStop();
+            stopCarIdle();
+            setCarState({ headlights: false, brakelights: false, rumble: false, puffing: false });
+
+            // Smoothly exit Spotlight Focus Mode (550ms transition restoring camera & full network)
+            exitFocusMode(550);
+
+            // After exit transition completes (~550ms), finish drive and invoke onVehicleFinish
+            finishCallbackTimeoutRef.current = setTimeout(() => {
+              finishCallbackTimeoutRef.current = null;
+              setIsCarDriving(false);
+              onVehicleFinishRef.current?.(thisPickupId);
+            }, 550);
+          }, 1000);
+        }
+      };
+
+      carAnimFrameRef.current = requestAnimationFrame(stepDrive);
+    }, 1000);
+
     return true;
-  }, [ensureGraphLayers, setCarLights]);
+  }, [ensureGraphLayers, enterFocusMode, exitFocusMode, setCarState]);
 
   // Automatic Car Drive Trigger on route_confirm & Instant Cleanup on tab switch / reset / prev step
   const isConfirm = step.event_type === 'route_confirm';
@@ -2164,31 +2684,26 @@ export default function MapCanvas({
     } else {
       // Clear/hide the car marker immediately whenever switching pickup tabs, resetting, or stepping backward before route_confirm
       lastDrivenStepKeyRef.current = null;
-      if (carAnimFrameRef.current) {
-        cancelAnimationFrame(carAnimFrameRef.current);
-        carAnimFrameRef.current = null;
-      }
-      if (arrivalTimeoutRef.current) {
-        clearTimeout(arrivalTimeoutRef.current);
-        arrivalTimeoutRef.current = null;
-      }
-      stopAllSounds();
-      setCarLights(false, false);
-      if (carMarkerRef.current) {
-        carMarkerRef.current.remove();
-        carMarkerRef.current = null;
-      }
-      setIsCarDriving(false);
-
-      const map = mapRef.current;
-      if (isMapReady(map)) {
-        const routeDrawnSource = map.getSource('edges-route-drawn-source');
-        if (routeDrawnSource && activePickupId !== 'ALL' && activePickupId !== null) {
-          routeDrawnSource.setData({ type: 'FeatureCollection', features: [] });
-        }
-      }
+      cleanupVehicleAndFocusMode();
     }
-  }, [activePickupId, isConfirm, currentStepNum, activePathNodes, animateVehicle, isMapLoaded]);
+  }, [activePickupId, isConfirm, currentStepNum, activePathNodes, animateVehicle, cleanupVehicleAndFocusMode, isMapLoaded]);
+
+  // Instant Pause / Stop All watcher to cancel vehicle drive immediately
+  const prevIsRunAllRef = useRef(isRunAll);
+  const prevIsPlayingRef = useRef(isPlaying);
+  useEffect(() => {
+    if (prevIsRunAllRef.current && !isRunAll && isCarDrivingRef.current) {
+      cleanupVehicleAndFocusMode();
+    }
+    prevIsRunAllRef.current = isRunAll;
+  }, [isRunAll, cleanupVehicleAndFocusMode]);
+
+  useEffect(() => {
+    if (prevIsPlayingRef.current && !isPlaying && !isRunAll && isCarDrivingRef.current) {
+      cleanupVehicleAndFocusMode();
+    }
+    prevIsPlayingRef.current = isPlaying;
+  }, [isPlaying, isRunAll, cleanupVehicleAndFocusMode]);
 
   // 9. Instant Local Search + External Photon Geocoder (0 forbidden URLs)
   const handleSearchQueryChange = (e) => {
@@ -2694,6 +3209,17 @@ export default function MapCanvas({
           </button>
         </div>
       )}
+
+      {/* 2.5D Spotlight Focus Mode Live Delivery Telemetry Pill */}
+      <div
+        ref={telemetryPillRef}
+        className="telemetry-pill-container pointer-events-none select-none absolute bottom-6 left-1/2 -translate-x-1/2 z-30 bg-white/95 backdrop-blur border border-slate-200/90 shadow-lg rounded-full px-4 py-2 transition-all duration-300"
+        style={{
+          display: 'none',
+          opacity: 0,
+          transform: 'translate(-50%, 12px)',
+        }}
+      />
 
       {/* Clean Attribution Pill */}
       <div className="absolute bottom-2 right-4 z-20 px-2 py-0.5 rounded-full bg-white/70 backdrop-blur-xs text-[9.5px] text-slate-500 font-medium pointer-events-none">

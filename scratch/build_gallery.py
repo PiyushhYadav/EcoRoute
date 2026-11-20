@@ -9,32 +9,39 @@ PUBLIC_OUT = BASE_DIR / "hero_gallery.html"
 
 IMAGES = [
     {
-        "id": "rover1",
-        "title": "1. Delhi Rain Street Scan (Your Favorite)",
-        "tag": "Original Selection",
-        "desc": "Autonomous all-terrain recovery rover scanning wet Delhi streets at dusk with an omnidirectional emerald LiDAR grid, auto-rickshaws and urban street life in background.",
-        "path": BASE_DIR / "hero_rover_original_delhi.jpg"
+        "id": "map_holo",
+        "title": "1. Holographic Dispatch Map Room",
+        "tag": "3D Tactical Map",
+        "desc": "High-rise dispatch war room with rain on the panoramic glass, centered around a floating glass tactical table projecting a 3D glowing emerald holographic terrain map with laser routing lines.",
+        "path": BASE_DIR / "hero_concept_command_room.jpg"
     },
     {
-        "id": "rover2",
-        "title": "2. Connaught Place Colonnade",
-        "tag": "Heritage Architecture",
-        "desc": "Rover in front of the iconic circular white colonnades of Connaught Place, New Delhi at rainy night, projecting emerald laser scan lines across wet cobblestone.",
+        "id": "map_relief",
+        "title": "2. Basalt Relief Model of Delhi NCR",
+        "tag": "Physical Topography",
+        "desc": "Architectural stone relief model carved from dark basalt, displaying the concentric circular road network and radial avenues with embedded glowing emerald fiber-optic routing channels.",
+        "path": BASE_DIR / "hero_relief_map_delhi.jpg"
+    },
+    {
+        "id": "map_silicon",
+        "title": "3. Hardware Circuit City Map",
+        "tag": "E-Waste Graph",
+        "desc": "Macro architectural view of dark obsidian circuit boards, microchips, and capacitors sculpted into an urban grid, with routing pulses traveling along etched copper traces.",
+        "path": BASE_DIR / "hero_concept_silicon_city.jpg"
+    },
+    {
+        "id": "map_rover_cp",
+        "title": "4. Connaught Place LiDAR Mapping",
+        "tag": "Currently Active",
+        "desc": "Autonomous collection rover in front of the iconic white colonnades of Connaught Place at rainy night, projecting a green optical LiDAR coordinate grid onto the street.",
         "path": BASE_DIR / "hero_rover_connaught_place.jpg"
     },
     {
-        "id": "rover3",
-        "title": "3. Arterial Flyover Fleet",
-        "tag": "Highway Transit",
-        "desc": "Tracked autonomous collection rovers traversing multi-level concrete highway flyovers in rain at twilight, sweeping wide emerald LiDAR beams across flyover pillars.",
+        "id": "map_flyover",
+        "title": "5. Arterial Flyover LiDAR Grid",
+        "tag": "Highway Scan",
+        "desc": "Autonomous rovers traversing multi-level concrete highway flyovers in rain, sweeping wide emerald LiDAR scan arcs across flyover pillars and roadbeds.",
         "path": BASE_DIR / "hero_rover_flyover_fleet.jpg"
-    },
-    {
-        "id": "rover4",
-        "title": "4. Low-Angle Action Splash",
-        "tag": "Dynamic Speed",
-        "desc": "Low-angle action shot of the tracked rover charging through rain puddles with water spray, projecting a 360-degree emerald LiDAR scan fan and coordinate grid.",
-        "path": BASE_DIR / "hero_rover_action_splash.jpg"
     }
 ]
 
@@ -52,7 +59,7 @@ html_content = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>EcoRoute Rover Variations</title>
+  <title>EcoRoute Map Concepts</title>
   <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
   <style>
     body {{
@@ -66,23 +73,23 @@ html_content = f"""<!DOCTYPE html>
   </style>
 </head>
 <body class="p-4 sm:p-6 min-h-screen">
-  <div class="max-w-5xl mx-auto space-y-6">
+  <div class="max-w-6xl mx-auto space-y-6">
 
     <!-- Header -->
     <div class="flex items-center justify-between border-b border-slate-800 pb-4">
       <div>
         <div class="flex items-center gap-2">
           <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
-          <span class="text-xs uppercase font-mono tracking-widest text-emerald-400 font-semibold">EcoRoute Autonomous Fleet</span>
+          <span class="text-xs uppercase font-mono tracking-widest text-emerald-400 font-semibold">EcoRoute Map & Routing Suite</span>
         </div>
-        <h1 class="text-xl sm:text-2xl font-bold text-white mt-1">Autonomous LiDAR Collection Rover (4 Variations)</h1>
-        <p class="text-xs sm:text-sm text-slate-400">Variations of your favorite concept: doorstep collection, LiDAR coordinate mapping, and Delhi urban streetscapes.</p>
+        <h1 class="text-xl sm:text-2xl font-bold text-white mt-1">5 Map & Network Concepts</h1>
+        <p class="text-xs sm:text-sm text-slate-400">Artistic interpretations directly inspired by EcoRoute's Delhi NCR node graph and Dijkstra routing engine.</p>
       </div>
       <span class="px-3 py-1 rounded-full bg-slate-800 text-slate-300 text-xs font-mono border border-slate-700">3:4 Portrait</span>
     </div>
 
     <!-- Interactive Selector Tabs -->
-    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3" id="tabContainer">
+    <div class="grid grid-cols-2 sm:grid-cols-5 gap-2 sm:gap-3" id="tabContainer">
 """
 
 for i, item in enumerate(encoded_data):
@@ -108,23 +115,23 @@ html_content += """
       <!-- Left: Context Info -->
       <div class="lg:col-span-6 space-y-4">
         <div>
-          <span id="activeBadge" class="px-2.5 py-1 rounded-md bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-mono font-semibold uppercase">Original Selection</span>
-          <h2 id="activeTitle" class="text-xl sm:text-2xl font-bold text-white mt-2">1. Delhi Rain Street Scan</h2>
-          <p id="activeDesc" class="text-sm text-slate-300 mt-2 leading-relaxed">Autonomous all-terrain recovery rover scanning wet Delhi streets at dusk with an omnidirectional emerald LiDAR grid, auto-rickshaws and urban street life in background.</p>
+          <span id="activeBadge" class="px-2.5 py-1 rounded-md bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-mono font-semibold uppercase">3D Tactical Map</span>
+          <h2 id="activeTitle" class="text-xl sm:text-2xl font-bold text-white mt-2">1. Holographic Dispatch Map Room</h2>
+          <p id="activeDesc" class="text-sm text-slate-300 mt-2 leading-relaxed">High-rise dispatch war room with rain on the panoramic glass, centered around a floating glass tactical table projecting a 3D glowing emerald holographic terrain map with laser routing lines.</p>
         </div>
 
         <div class="p-4 rounded-xl bg-slate-950/60 border border-slate-800 text-xs space-y-2 text-slate-400 font-mono">
           <div class="flex justify-between">
-            <span>Subject:</span>
-            <span class="text-slate-200">Autonomous Electric Collection Rover</span>
+            <span>Map Relation:</span>
+            <span id="activeRelation" class="text-slate-200">3D Holographic Urban Terrain & Routing Vectors</span>
           </div>
           <div class="flex justify-between">
-            <span>Mapping Technology:</span>
-            <span class="text-emerald-400 font-semibold">360° Optical LiDAR Coordinate Grid</span>
+            <span>Theme Alignment:</span>
+            <span id="activeTheme" class="text-emerald-400 font-semibold">Dispatch Operations & Algorithmic Routing</span>
           </div>
           <div class="flex justify-between">
-            <span>Setting:</span>
-            <span class="text-slate-200">Delhi NCR Rain-Slicked Streets & Infrastructure</span>
+            <span>Text / HUD:</span>
+            <span class="text-slate-200">Zero (Clean Cinematic Photography)</span>
           </div>
         </div>
 
@@ -172,8 +179,8 @@ html_content += """
 
     <!-- Side-by-Side Direct Comparison Grid -->
     <div class="space-y-3 pt-4">
-      <h3 class="text-sm uppercase font-mono tracking-wider text-slate-400 font-semibold">Side-by-Side Direct Comparison</h3>
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <h3 class="text-sm uppercase font-mono tracking-wider text-slate-400 font-semibold">Side-by-Side Gallery</h3>
+      <div class="grid grid-cols-2 sm:grid-cols-5 gap-3">
 """
 
 for item in encoded_data:
@@ -183,7 +190,7 @@ for item in encoded_data:
             <img src="{item['src']}" alt="{item['title']}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300">
           </div>
           <div class="text-xs font-semibold text-slate-200 group-hover:text-emerald-400 transition-colors leading-tight">{item['title']}</div>
-          <div class="text-[11px] text-slate-500 line-clamp-2">{item['desc']}</div>
+          <div class="text-[10px] text-slate-500 line-clamp-2">{item['desc']}</div>
         </div>
     """
 
@@ -215,7 +222,7 @@ html_content += f"""
       }});
     }}
 
-    selectOption('rover1');
+    selectOption('map_holo');
   </script>
 </body>
 </html>
@@ -223,4 +230,4 @@ html_content += f"""
 
 OUT_FILE.write_text(html_content, encoding="utf-8")
 PUBLIC_OUT.write_text(html_content, encoding="utf-8")
-print(f"Gallery updated at {OUT_FILE} and {PUBLIC_OUT}")
+print(f"Gallery updated with 5 map-inspired concepts at {OUT_FILE}")

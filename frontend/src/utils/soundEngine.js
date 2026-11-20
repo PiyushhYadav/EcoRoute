@@ -2,7 +2,8 @@
  * EcoRoute Zero-Dependency Web Audio API Synthesizer
  * 
  * Provides self-contained procedural sound effects for Dijkstra graph traversal
- * and Mr. Bean's Mini Cooper vehicle animation.
+ * and Mr. Bean's Mini Cooper vehicle animation (Ignition, Idle Purr, Driving Hum,
+ * Deceleration Swoosh, Emerald Arrival Chime, Engine Shut-off).
  * Zero external .mp3/.wav files - instantaneous loading, 100% offline & Render compatible.
  */
 
@@ -13,6 +14,7 @@ let audioCtx = null;
 let masterGain = null;
 let isMuted = false;
 let activeHum = null; // { osc, filter, gain }
+let activeIdle = null; // { osc1, osc2, filter, gain }
 const muteListeners = new Set();
 
 // Load initial mute state from localStorage (default: false / sound on)
@@ -118,7 +120,7 @@ export function subscribeMute(listener) {
 
 /**
  * 2. playNodeTick():
- * Ultra-subtle, crisp wooden/glass "tick" (~45ms blip sweeping 680Hz → 520Hz, low gain 0.08)
+ * Ultra-subtle, crisp wooden/glass "tick" (~45ms blip sweeping 680Hz -> 520Hz, low gain 0.08)
  * fired when the Dijkstra snake arrowhead reaches a new node.
  */
 export function playNodeTick() {
@@ -157,8 +159,8 @@ export function playNodeTick() {
 
 /**
  * 3. playCarIgnition():
- * Warm low-pass filtered engine purr/rev (~280ms, dual detuned sawtooth/triangle
- * sweeping 65Hz → 115Hz → 85Hz through a 320Hz low-pass filter).
+ * Richer engine start & rev roar (~680ms, dual detuned sawtooth/triangle
+ * sweeping through starter rumble into a lively warm throttle rev).
  */
 export function playCarIgnition() {
   if (isMuted) return;
@@ -167,30 +169,35 @@ export function playCarIgnition() {
 
   try {
     const now = ctx.currentTime;
-    const duration = 0.28;
+    const duration = 0.68;
 
     const filter = ctx.createBiquadFilter();
     filter.type = 'lowpass';
-    filter.frequency.setValueAtTime(320, now);
+    filter.frequency.setValueAtTime(260, now);
+    filter.frequency.linearRampToValueAtTime(520, now + 0.28);
+    filter.frequency.exponentialRampToValueAtTime(240, now + duration);
 
     const gain = ctx.createGain();
     gain.gain.setValueAtTime(0.001, now);
     gain.gain.linearRampToValueAtTime(0.18, now + 0.08);
+    gain.gain.linearRampToValueAtTime(0.14, now + 0.32);
     gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
 
-    // Dual detuned oscillators for authentic engine warmth
+    // Dual detuned oscillators for authentic engine roar
     const osc1 = ctx.createOscillator();
     osc1.type = 'sawtooth';
-    osc1.frequency.setValueAtTime(65, now);
-    osc1.frequency.linearRampToValueAtTime(115, now + 0.12);
-    osc1.frequency.linearRampToValueAtTime(85, now + duration);
+    osc1.frequency.setValueAtTime(48, now);
+    osc1.frequency.linearRampToValueAtTime(80, now + 0.12);
+    osc1.frequency.linearRampToValueAtTime(145, now + 0.28);
+    osc1.frequency.exponentialRampToValueAtTime(68, now + duration);
 
     const osc2 = ctx.createOscillator();
     osc2.type = 'triangle';
-    osc2.detune.setValueAtTime(7.5, now); // 7.5 cent detune
-    osc2.frequency.setValueAtTime(65, now);
-    osc2.frequency.linearRampToValueAtTime(115, now + 0.12);
-    osc2.frequency.linearRampToValueAtTime(85, now + duration);
+    osc2.detune.setValueAtTime(9.0, now);
+    osc2.frequency.setValueAtTime(48, now);
+    osc2.frequency.linearRampToValueAtTime(80, now + 0.12);
+    osc2.frequency.linearRampToValueAtTime(145, now + 0.28);
+    osc2.frequency.exponentialRampToValueAtTime(68, now + duration);
 
     osc1.connect(filter);
     osc2.connect(filter);
@@ -209,18 +216,99 @@ export function playCarIgnition() {
         filter.disconnect();
         gain.disconnect();
       } catch (e) {}
-    }, 340);
+    }, 750);
   } catch (e) {}
 }
 
 /**
- * 4. startCarHum(speed = 1):
- * Very soft, continuous low-pass filtered engine hum (~75Hz * (0.85 + 0.15 * speed), gain 0.07)
- * fades in smoothly (80ms) while the Mini Cooper is driving.
+ * 4. startCarIdle():
+ * Gentle low idle rumble/purr (detuned oscillators at ~44Hz with lowpass filter at 140Hz,
+ * organic 1.5Hz beat frequency, low gain ~0.038) looping during stationary warm-up & cool-down.
+ */
+export function startCarIdle() {
+  stopCarIdle(0.05);
+  if (isMuted) return;
+  const ctx = getAudioContext();
+  if (!ctx || ctx.state !== 'running') return;
+
+  try {
+    const now = ctx.currentTime;
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(140, now);
+
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.linearRampToValueAtTime(0.038, now + 0.15);
+
+    const osc1 = ctx.createOscillator();
+    osc1.type = 'triangle';
+    osc1.frequency.setValueAtTime(44, now);
+
+    const osc2 = ctx.createOscillator();
+    osc2.type = 'sawtooth';
+    osc2.frequency.setValueAtTime(45.5, now);
+
+    osc1.connect(filter);
+    osc2.connect(filter);
+    filter.connect(gain);
+    gain.connect(masterGain);
+
+    osc1.start(now);
+    osc2.start(now);
+
+    activeIdle = { osc1, osc2, filter, gain };
+  } catch (e) {
+    activeIdle = null;
+  }
+}
+
+/**
+ * stopCarIdle(fadeTime = 0.1):
+ * Fades out engine idle purr cleanly.
+ */
+export function stopCarIdle(fadeTime = 0.1) {
+  if (!activeIdle) return;
+  const idle = activeIdle;
+  activeIdle = null;
+
+  try {
+    const ctx = getAudioContext();
+    if (ctx && idle.gain) {
+      const now = ctx.currentTime;
+      idle.gain.gain.cancelScheduledValues(now);
+      idle.gain.gain.setValueAtTime(idle.gain.gain.value, now);
+      idle.gain.gain.linearRampToValueAtTime(0.0001, now + fadeTime);
+
+      setTimeout(() => {
+        try {
+          idle.osc1.stop();
+          idle.osc2.stop();
+          idle.osc1.disconnect();
+          idle.osc2.disconnect();
+          idle.filter.disconnect();
+          idle.gain.disconnect();
+        } catch (e) {}
+      }, Math.ceil(fadeTime * 1000) + 40);
+    } else {
+      try {
+        idle.osc1.stop();
+        idle.osc2.stop();
+        idle.osc1.disconnect();
+        idle.osc2.disconnect();
+      } catch (e) {}
+    }
+  } catch (e) {}
+}
+
+/**
+ * 5. startCarHum(speed = 1):
+ * Very soft, continuous low-pass filtered engine driving hum (~75Hz * (0.85 + 0.15 * speed), gain 0.065)
+ * fades in smoothly (80ms) while the Mini Cooper is cruising.
  */
 export function startCarHum(speed = 1) {
-  // Always safely clean up any prior hum before starting
   stopCarHum(0.02);
+  stopCarIdle(0.05);
 
   if (isMuted) return;
   const ctx = getAudioContext();
@@ -240,8 +328,7 @@ export function startCarHum(speed = 1) {
 
     const gain = ctx.createGain();
     gain.gain.setValueAtTime(0.0001, now);
-    // Smooth 80ms fade-in to subtle gain 0.07
-    gain.gain.linearRampToValueAtTime(0.07, now + 0.08);
+    gain.gain.linearRampToValueAtTime(0.065, now + 0.08);
 
     osc.connect(filter);
     filter.connect(gain);
@@ -290,20 +377,17 @@ export function stopCarHum(fadeTime = 0.12) {
 }
 
 /**
- * 5. playCarBrakeAndArrive():
- * Brief gentle filtered white-noise deceleration swoosh (~220ms bandpass sweeping 900Hz → 260Hz)
- * followed by a clean, soft two-note emerald arrival chime (C5 → G5, sine wave, exponential decay).
+ * 6. playCarBrake():
+ * Gentle filtered white-noise deceleration swoosh (~240ms bandpass sweeping 880Hz -> 250Hz).
  */
-export function playCarBrakeAndArrive() {
+export function playCarBrake() {
   if (isMuted) return;
   const ctx = getAudioContext();
   if (!ctx || ctx.state !== 'running') return;
 
   try {
     const now = ctx.currentTime;
-
-    // A. Gentle deceleration swoosh (~220ms filtered white noise)
-    const noiseDuration = 0.22;
+    const noiseDuration = 0.24;
     const sampleRate = ctx.sampleRate || 44100;
     const bufferSize = Math.floor(sampleRate * noiseDuration);
     const noiseBuffer = ctx.createBuffer(1, bufferSize, sampleRate);
@@ -317,13 +401,13 @@ export function playCarBrakeAndArrive() {
 
     const bpf = ctx.createBiquadFilter();
     bpf.type = 'bandpass';
-    bpf.Q.setValueAtTime(2.8, now);
-    bpf.frequency.setValueAtTime(900, now);
-    bpf.frequency.exponentialRampToValueAtTime(260, now + noiseDuration);
+    bpf.Q.setValueAtTime(2.6, now);
+    bpf.frequency.setValueAtTime(880, now);
+    bpf.frequency.exponentialRampToValueAtTime(250, now + noiseDuration);
 
     const swooshGain = ctx.createGain();
     swooshGain.gain.setValueAtTime(0.001, now);
-    swooshGain.gain.linearRampToValueAtTime(0.06, now + 0.035);
+    swooshGain.gain.linearRampToValueAtTime(0.055, now + 0.035);
     swooshGain.gain.exponentialRampToValueAtTime(0.0001, now + noiseDuration);
 
     whiteNoise.connect(bpf);
@@ -333,9 +417,29 @@ export function playCarBrakeAndArrive() {
     whiteNoise.start(now);
     whiteNoise.stop(now + noiseDuration);
 
-    // B. Clean two-note emerald arrival chime (C5: 523.25Hz, G5: 783.99Hz)
-    const chime1Start = now + 0.16;
-    const chime2Start = now + 0.32;
+    setTimeout(() => {
+      try {
+        whiteNoise.disconnect();
+        bpf.disconnect();
+        swooshGain.disconnect();
+      } catch (e) {}
+    }, 320);
+  } catch (e) {}
+}
+
+/**
+ * 7. playArrivalChime():
+ * Clean, soft two-note emerald arrival chime (C5: 523.25Hz -> G5: 783.99Hz, sine wave, exponential decay).
+ */
+export function playArrivalChime() {
+  if (isMuted) return;
+  const ctx = getAudioContext();
+  if (!ctx || ctx.state !== 'running') return;
+
+  try {
+    const now = ctx.currentTime;
+    const chime1Start = now + 0.02;
+    const chime2Start = now + 0.18;
 
     // Note 1: C5
     const oscC5 = ctx.createOscillator();
@@ -345,12 +449,12 @@ export function playCarBrakeAndArrive() {
 
     gainC5.gain.setValueAtTime(0.001, chime1Start);
     gainC5.gain.linearRampToValueAtTime(0.08, chime1Start + 0.015);
-    gainC5.gain.exponentialRampToValueAtTime(0.0001, chime1Start + 0.22);
+    gainC5.gain.exponentialRampToValueAtTime(0.0001, chime1Start + 0.24);
 
     oscC5.connect(gainC5);
     gainC5.connect(masterGain);
     oscC5.start(chime1Start);
-    oscC5.stop(chime1Start + 0.22);
+    oscC5.stop(chime1Start + 0.24);
 
     // Note 2: G5 (bright, joyful arrival ring)
     const oscG5 = ctx.createOscillator();
@@ -360,34 +464,107 @@ export function playCarBrakeAndArrive() {
 
     gainG5.gain.setValueAtTime(0.001, chime2Start);
     gainG5.gain.linearRampToValueAtTime(0.09, chime2Start + 0.015);
-    gainG5.gain.exponentialRampToValueAtTime(0.0001, chime2Start + 0.36);
+    gainG5.gain.exponentialRampToValueAtTime(0.0001, chime2Start + 0.38);
 
     oscG5.connect(gainG5);
     gainG5.connect(masterGain);
     oscG5.start(chime2Start);
-    oscG5.stop(chime2Start + 0.36);
+    oscG5.stop(chime2Start + 0.38);
 
     setTimeout(() => {
       try {
-        whiteNoise.disconnect();
-        bpf.disconnect();
-        swooshGain.disconnect();
         oscC5.disconnect();
         gainC5.disconnect();
         oscG5.disconnect();
         gainG5.disconnect();
       } catch (e) {}
-    }, 750);
+    }, 650);
   } catch (e) {}
 }
 
 /**
- * 6. stopAllSounds():
- * Immediately stops any active hum and cancels scheduled gain values whenever
+ * 8. playCarBrakeAndArrive():
+ * Backwards compatibility helper chaining brake swoosh and arrival chime.
+ */
+export function playCarBrakeAndArrive() {
+  playCarBrake();
+  playArrivalChime();
+}
+
+/**
+ * 9. playEngineStop():
+ * Subtle engine shut-off: short drop in pitch (65Hz down to 22Hz over 350ms with filter closing)
+ * followed by a delicate mechanical relay switch click.
+ */
+export function playEngineStop() {
+  if (isMuted) return;
+  const ctx = getAudioContext();
+  if (!ctx || ctx.state !== 'running') return;
+
+  try {
+    const now = ctx.currentTime;
+    const duration = 0.35;
+
+    // Engine spin-down tone
+    const osc = ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(65, now);
+    osc.frequency.exponentialRampToValueAtTime(22, now + duration);
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(180, now);
+    filter.frequency.exponentialRampToValueAtTime(40, now + duration);
+
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.035, now);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(masterGain);
+
+    osc.start(now);
+    osc.stop(now + duration);
+
+    // Subtle relay / key switch click at the end
+    const clickStart = now + 0.32;
+    const clickOsc = ctx.createOscillator();
+    clickOsc.type = 'triangle';
+    clickOsc.frequency.setValueAtTime(1100, clickStart);
+    clickOsc.frequency.exponentialRampToValueAtTime(300, clickStart + 0.015);
+
+    const clickGain = ctx.createGain();
+    clickGain.gain.setValueAtTime(0.001, clickStart);
+    clickGain.gain.linearRampToValueAtTime(0.04, clickStart + 0.002);
+    clickGain.gain.exponentialRampToValueAtTime(0.0001, clickStart + 0.018);
+
+    clickOsc.connect(clickGain);
+    clickGain.connect(masterGain);
+
+    clickOsc.start(clickStart);
+    clickOsc.stop(clickStart + 0.02);
+
+    setTimeout(() => {
+      try {
+        osc.disconnect();
+        filter.disconnect();
+        gain.disconnect();
+        clickOsc.disconnect();
+        clickGain.disconnect();
+      } catch (e) {}
+    }, 450);
+  } catch (e) {}
+}
+
+/**
+ * 10. stopAllSounds():
+ * Immediately stops any active hum and idle purr, and cancels scheduled gain values whenever
  * Pause, Reset, Stop All, tab switch, or page unmount occurs.
  */
 export function stopAllSounds() {
   stopCarHum(0.01);
+  stopCarIdle(0.01);
   if (masterGain && audioCtx) {
     try {
       const now = audioCtx.currentTime;

@@ -235,9 +235,6 @@ export default function OverviewPage() {
                   <Activity className="w-3.5 h-3.5 text-emerald-600" />
                   <span>Instant Ward Route Inspector</span>
                 </span>
-                <span className="text-[11px] font-mono text-emerald-700 bg-emerald-100/70 px-2 py-0.5 rounded-md font-semibold">
-                  O((V + E) log V)
-                </span>
               </div>
 
               {/* Pickup Selector Pills */}
