@@ -3,6 +3,7 @@ import MapCanvas from '../components/MapCanvas';
 import InspectorPanel from '../components/InspectorPanel';
 import DisruptionModal from '../components/DisruptionModal';
 import { api } from '../api/client';
+import { unlockAudio, stopAllSounds } from '../utils/soundEngine';
 
 export default function DispatchPage() {
   const [nodes, setNodes] = useState([]);
@@ -18,9 +19,17 @@ export default function DispatchPage() {
 
   // Playback state
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isRunAll, setIsRunAll] = useState(false);
+  const [currentRunAllIndex, setCurrentRunAllIndex] = useState(0);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [dispatchOrder, setDispatchOrder] = useState('default');
   const [metric, setMetric] = useState('time'); // 'time' | 'distance'
+
+  const runAllTimerRef = useRef(null);
+  const isRunAllRef = useRef(false);
+  isRunAllRef.current = isRunAll;
+  const currentRunAllIndexRef = useRef(0);
+  currentRunAllIndexRef.current = currentRunAllIndex;
 
   // Disruption modal state
   const [selectedEdge, setSelectedEdge] = useState(null);
@@ -128,27 +137,164 @@ export default function DispatchPage() {
   const currentSteps = activeWalkthrough?.steps || [];
   const activeStep = currentSteps[currentStepIndex] || currentSteps[0] || null;
 
-  // Automated Playback Timer
+  // Cleanup audio on unmount
   useEffect(() => {
-    if (!isPlaying || selectedPickupId === 'ALL') return;
+    return () => {
+      stopAllSounds();
+    };
+  }, []);
 
-    const intervalTime = Math.max(700, Math.floor(2000 / playbackSpeed));
+  // Stop Run All & Playback cleanly
+  const handleStopAll = useCallback(() => {
+    stopAllSounds();
+    isRunAllRef.current = false;
+    setIsRunAll(false);
+    setIsPlaying(false);
+    if (runAllTimerRef.current) {
+      clearTimeout(runAllTimerRef.current);
+      runAllTimerRef.current = null;
+    }
+  }, []);
+
+  // Advance Run All sequentially across pickups: wipes clean between pickups
+  const advanceRunAll = useCallback(() => {
+    if (!isRunAllRef.current) return;
+
+    if (runAllTimerRef.current) {
+      clearTimeout(runAllTimerRef.current);
+      runAllTimerRef.current = null;
+    }
+
+    const nextIndex = currentRunAllIndexRef.current + 1;
+    if (nextIndex < pickupWalkthroughs.length) {
+      // Wipe Clean Between Pickups:
+      // Clear previous pickup route highlights, visited SPT edges, and node cost chips
+      // back to thin neutral slate so the map starts completely clean for the next pickup.
+      // Changing selectedPickupId to next pickup and setting step to 0 loads dijkstra_init of next pickup.
+      currentRunAllIndexRef.current = nextIndex;
+      setCurrentRunAllIndex(nextIndex);
+      setSelectedPickupId(pickupWalkthroughs[nextIndex].pickup_id);
+      setCurrentStepIndex(0);
+      setPreviewPathNodes(null);
+    } else {
+      // Once the final pickup finishes its confirmation drive, automatically
+      // switches to the All Summary tab to display all completed routes and aggregate metrics together.
+      isRunAllRef.current = false;
+      setIsRunAll(false);
+      currentRunAllIndexRef.current = 0;
+      setCurrentRunAllIndex(0);
+      setSelectedPickupId('ALL');
+      setCurrentStepIndex(0);
+      setPreviewPathNodes(null);
+    }
+  }, [pickupWalkthroughs]);
+
+  // Vehicle arrival callback for Run All mode
+  const handleVehicleFinish = useCallback((finishedPickupId) => {
+    if (!isRunAllRef.current) return;
+
+    // Verify finished pickup matches active pickup in currentRunAllIndex
+    const currentWalkthrough = pickupWalkthroughs[currentRunAllIndexRef.current];
+    if (finishedPickupId && currentWalkthrough && finishedPickupId !== currentWalkthrough.pickup_id) {
+      return;
+    }
+
+    // Route confirmed and vehicle reached destination!
+    // Hold ~800ms visual pause so viewer sees completed assignment & updated capacity bar, then advance to next pickup
+    if (runAllTimerRef.current) {
+      clearTimeout(runAllTimerRef.current);
+      runAllTimerRef.current = null;
+    }
+    runAllTimerRef.current = setTimeout(() => {
+      advanceRunAll();
+    }, 800);
+  }, [advanceRunAll, pickupWalkthroughs]);
+
+  // Start Run All Sequential Simulation
+  const handleRunAll = useCallback(() => {
+    unlockAudio();
+    handleStopAll();
+    if (!pickupWalkthroughs.length) return;
+
+    isRunAllRef.current = true;
+    currentRunAllIndexRef.current = 0;
+    setIsRunAll(true);
+    setCurrentRunAllIndex(0);
+    setSelectedPickupId(pickupWalkthroughs[0].pickup_id);
+    setCurrentStepIndex(0);
+    setPreviewPathNodes(null);
+  }, [handleStopAll, pickupWalkthroughs]);
+
+  // Single-Pickup Automated Playback Timer
+  useEffect(() => {
+    if (isRunAll || !isPlaying || selectedPickupId === 'ALL') return;
+
+    const intervalTime = Math.max(Math.round(650 / playbackSpeed), Math.floor(1000 / playbackSpeed));
     const timer = setInterval(() => {
       setCurrentStepIndex((prev) => {
         if (prev >= currentSteps.length - 1) {
           setIsPlaying(false);
           return prev;
         }
-        return prev + 1;
+        const next = prev + 1;
+        if (next >= currentSteps.length - 1) {
+          setIsPlaying(false);
+        }
+        return next;
       });
     }, intervalTime);
 
     return () => clearInterval(timer);
-  }, [isPlaying, playbackSpeed, currentSteps.length, selectedPickupId]);
+  }, [isPlaying, isRunAll, playbackSpeed, currentSteps.length, selectedPickupId]);
+
+  // Run All Sequential Playback Timer
+  useEffect(() => {
+    if (!isRunAll) return;
+
+    const currentWalkthrough = pickupWalkthroughs[currentRunAllIndex];
+    if (!currentWalkthrough) {
+      handleStopAll();
+      return;
+    }
+
+    const steps = currentWalkthrough.steps || [];
+    if (steps.length === 0) {
+      advanceRunAll();
+      return;
+    }
+
+    if (currentStepIndex >= steps.length - 1) {
+      // Reached the terminal/route_confirm step of this pickup
+      const finalStep = steps[currentStepIndex] || {};
+      const pathNodes = finalStep.path_nodes || [];
+
+      // If no multi-node path (e.g. unassignable or empty route), hold 800ms and advance
+      if (pathNodes.length < 2) {
+        if (runAllTimerRef.current) clearTimeout(runAllTimerRef.current);
+        runAllTimerRef.current = setTimeout(() => {
+          advanceRunAll();
+        }, 800);
+      }
+      // If pathNodes.length >= 2, the step timer is intentionally PAUSED!
+      // MapCanvas animates Mr. Bean's Mini Cooper along the route, and when the car reaches
+      // the destination centre, MapCanvas invokes handleVehicleFinish(pickupId), which
+      // waits 800ms and advances to the next pickup!
+      return;
+    }
+
+    // Play through intermediate steps of this pickup (>= 650ms / playbackSpeed)
+    const stepInterval = Math.max(Math.round(650 / playbackSpeed), Math.floor(1000 / playbackSpeed));
+    const timer = setTimeout(() => {
+      setCurrentStepIndex((prev) => prev + 1);
+    }, stepInterval);
+
+    return () => clearTimeout(timer);
+  }, [isRunAll, currentRunAllIndex, currentStepIndex, pickupWalkthroughs, playbackSpeed, advanceRunAll, handleStopAll]);
 
   // Tab Selection Handler (P1, P2, P3, P4, ALL)
   const handleSelectPickupTab = (tabId) => {
-    setIsPlaying(false);
+    stopAllSounds();
+    handleStopAll();
     setSelectedPickupId(tabId);
     setCurrentStepIndex(0);
     setPreviewPathNodes(null);
@@ -156,30 +302,42 @@ export default function DispatchPage() {
 
   // Playback Control Handlers
   const handlePlayPause = () => {
+    unlockAudio();
+    if (isRunAll) {
+      handleStopAll();
+      return;
+    }
     if (currentStepIndex >= currentSteps.length - 1) {
       setCurrentStepIndex(0);
       setIsPlaying(true);
     } else {
+      if (isPlaying) {
+        stopAllSounds();
+      }
       setIsPlaying(!isPlaying);
     }
   };
 
   const handlePrevStep = () => {
-    setIsPlaying(false);
+    unlockAudio();
+    handleStopAll();
     setCurrentStepIndex((prev) => Math.max(0, prev - 1));
   };
 
   const handleNextStep = () => {
-    setIsPlaying(false);
+    unlockAudio();
+    handleStopAll();
     setCurrentStepIndex((prev) => Math.min(currentSteps.length - 1, prev + 1));
   };
 
   const handleResetStep = () => {
-    setIsPlaying(false);
+    stopAllSounds();
+    handleStopAll();
     setCurrentStepIndex(0);
   };
 
   const handleSetDispatchOrder = (order) => {
+    handleStopAll();
     previousAllocationsRef.current = {};
     setRerouteNotice(null);
     setDispatchOrder(order);
@@ -187,6 +345,7 @@ export default function DispatchPage() {
   };
 
   const handleSetMetric = (newMetric) => {
+    handleStopAll();
     previousAllocationsRef.current = {};
     lastMetricRef.current = newMetric;
     setRerouteNotice(null);
@@ -212,6 +371,7 @@ export default function DispatchPage() {
 
   // Quick Presets
   const handleApplyDisruptionPreset = async (preset) => {
+    handleStopAll();
     if (preset === 'block_hub') {
       // Find edge between J1 and J2 (E10)
       const edge = edges.find(
@@ -242,6 +402,7 @@ export default function DispatchPage() {
 
   // Create Pickup on Canvas
   const handleCreatePickup = async (pickupPayload) => {
+    handleStopAll();
     const created = await api.createPickup(pickupPayload);
     await loadData(dispatchOrder, metric);
     if (created?.id) {
@@ -253,6 +414,7 @@ export default function DispatchPage() {
 
   // Create Centre on Canvas
   const handleCreateCentre = async (centrePayload) => {
+    handleStopAll();
     const created = await api.createCentre(centrePayload);
     await loadData(dispatchOrder, metric);
     return created;
@@ -260,6 +422,7 @@ export default function DispatchPage() {
 
   // Connect Nodes with Road Edge
   const handleConnectNodes = async (sourceId, targetId) => {
+    handleStopAll();
     const created = await api.createEdge({
       source_id: sourceId,
       target_id: targetId,
@@ -292,7 +455,7 @@ export default function DispatchPage() {
       return { ...(activeStep || {}), path_nodes: previewPathNodes };
     }
     if (selectedPickupId === 'ALL') {
-      // In ALL summary view, show all confirmed route edges
+      // In ALL summary view, show all confirmed route edges simultaneously
       const allPathEdges = [];
       const allPathNodes = [];
       greedySummary?.allocations?.forEach((a) => {
@@ -321,6 +484,8 @@ export default function DispatchPage() {
             selectedPickupId={selectedPickupId}
             currentStepIndex={currentStepIndex}
             isPlaying={isPlaying}
+            isRunAll={isRunAll}
+            currentRunAllIndex={currentRunAllIndex}
             playbackSpeed={playbackSpeed}
             dispatchOrder={dispatchOrder}
             metric={metric}
@@ -332,6 +497,8 @@ export default function DispatchPage() {
             rerouteNotice={rerouteNotice}
             onSelectPickupTab={handleSelectPickupTab}
             onPlayPause={handlePlayPause}
+            onRunAll={handleRunAll}
+            onStopAll={handleStopAll}
             onPrevStep={handlePrevStep}
             onNextStep={handleNextStep}
             onResetStep={handleResetStep}
@@ -357,12 +524,15 @@ export default function DispatchPage() {
             playbackSpeed={playbackSpeed}
             previousPath={rerouteNotice?.oldPath || null}
             allocations={greedySummary?.allocations || []}
+            isPlaying={isPlaying}
+            isRunAll={isRunAll}
             onSelectPickup={handleSelectPickupTab}
             onMetricChange={handleSetMetric}
             onSelectEdge={handleEdgeClick}
             onCreatePickup={handleCreatePickup}
             onCreateCentre={handleCreateCentre}
             onConnectNodes={handleConnectNodes}
+            onVehicleFinish={handleVehicleFinish}
           />
         </div>
       </div>

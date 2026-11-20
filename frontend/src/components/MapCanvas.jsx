@@ -10,18 +10,24 @@ import {
   Maximize2,
   Minimize2,
   Play,
-  RotateCcw,
-  Truck,
-  MapPin,
   X,
   Share2,
-  Sparkles,
-  AlertTriangle,
-  Building2,
-  CheckCircle2,
-  XCircle,
+  Clock,
+  Route,
+  Check,
 } from 'lucide-react';
 import { getMutedMapStyle } from '../utils/mapStyle';
+import {
+  unlockAudio,
+  playNodeTick,
+  playCarIgnition,
+  startCarHum,
+  stopCarHum,
+  playCarBrakeAndArrive,
+  stopAllSounds,
+} from '../utils/soundEngine';
+
+export const ALL_STREAMS = ['Batteries', 'Computers', 'Smartphones', 'Appliances'];
 
 // Load MapLibre Web Worker from self-contained Blob URL
 try {
@@ -43,6 +49,10 @@ export const CATEGORY_COLORS = {
   Appliances: '#0D9488',
 };
 
+/**
+ * Format cost values cleanly:
+ * Strips trailing .0 (e.g. 8m, 26m, 14km) while keeping non-integer decimals (e.g. 8.5km).
+ */
 export function formatCost(val, unit = '') {
   if (val == null || !Number.isFinite(Number(val)) || Number(val) >= 9000) {
     return '∞';
@@ -50,21 +60,11 @@ export function formatCost(val, unit = '') {
   const num = Number(val);
   const rounded = Math.round(num * 10) / 10;
   const formatted = Number.isInteger(rounded) ? `${rounded}` : rounded.toFixed(1);
-  return unit ? `${formatted} ${unit}` : formatted;
+  return unit ? `${formatted}${unit}` : formatted;
 }
 
 const DEFAULT_CENTER = [77.16, 28.61];
 const DEFAULT_ZOOM = 10.7;
-
-// Stylized region watermarks matching reference image
-const REGION_WATERMARKS = [
-  { name: 'NORTH DELHI', lng: 77.14, lat: 28.72 },
-  { name: 'CENTRAL DELHI', lng: 77.21, lat: 28.64 },
-  { name: 'DWARKA', lng: 77.04, lat: 28.58 },
-  { name: 'GURUGRAM', lng: 77.08, lat: 28.47 },
-  { name: 'NOIDA', lng: 77.33, lat: 28.56 },
-  { name: 'YAMUNA', lng: 77.27, lat: 28.67 },
-];
 
 // Offline instant NCR landmarks for zero-network instantaneous search
 const NCR_LOCAL_PLACES = [
@@ -87,8 +87,8 @@ const NCR_LOCAL_PLACES = [
 // Default known assignments fallback for standard nodes
 const DEFAULT_NODE_DESTINATIONS = {
   P1: { destId: 'R2', destName: 'Mayapuri Hub', time: 17.0, dist: 10.0, path: ['P1', 'J3', 'R2'], weight: 12.0, waste: 'Batteries' },
-  P2: { destId: 'R4', destName: 'Centre 28.59, 77.32', time: 50.0, dist: 31.2, path: ['P2', 'J4', 'J2', 'R1', 'R4'], weight: 16.0, waste: 'Computers' },
-  P3: { destId: 'R1', destName: 'Okhla Plant', time: 34.0, dist: 22.0, path: ['P3', 'J2', 'R1'], weight: 12.0, waste: 'Smartphones' },
+  P2: { destId: 'R4', destName: 'Mayapuri Hub', time: 50.0, dist: 31.2, path: ['P2', 'J4', 'J2', 'R1'], weight: 16.0, waste: 'Computers' },
+  P3: { destId: 'R1', destName: 'Okhla Plant', time: 34.0, dist: 22.0, path: ['P3', 'J2', 'R1'], weight: 15.0, waste: 'Smartphones' },
   P4: { destId: 'R3', destName: 'Bawana Plant', time: 28.0, dist: 19.0, path: ['P4', 'R3'], weight: 15.0, waste: 'Appliances' },
 };
 
@@ -120,6 +120,141 @@ export function getCleanLandmarkName(node) {
   return name || node.id;
 }
 
+/**
+ * Return single-line label format matching Option 2 reference:
+ * e.g. "P1 Janakpuri", "R2 Mayapuri Hub", "J3 Punjabi Bagh", "P3 Dwarka Sec 21", "R1 Okhla Plant"
+ */
+export function getNodeDisplayLabel(node) {
+  if (!node) return '';
+  const clean = getCleanLandmarkName(node);
+  if (clean === node.id) return node.id;
+  if (/^Pickup\s+P\d+/i.test(clean)) {
+    return `${node.id} Pickup`;
+  }
+  if (/^Centre\s+R\d+/i.test(clean)) {
+    return `${node.id} Centre`;
+  }
+  if (clean.toLowerCase().startsWith(node.id.toLowerCase())) {
+    return clean;
+  }
+  return `${node.id} ${clean}`;
+}
+
+// Lucide Recycle SVG markup for Recycling Centre markers
+const RECYCLE_SVG_12PX = `
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display: block;">
+    <path d="M7 19H4.815a1.83 1.83 0 0 1-1.57-.881 1.785 1.785 0 0 1-.004-1.784L7.196 9.5"></path>
+    <path d="M11 19h8.203a1.83 1.83 0 0 0 1.556-.89 1.784 1.784 0 0 0 0-1.775l-1.226-2.12"></path>
+    <path d="m14 16-3 3 3 3"></path>
+    <path d="M8.293 13.596 7.196 9.5 3.1 10.598"></path>
+    <path d="m9.344 5.811 1.093-1.892A1.83 1.83 0 0 1 11.985 3a1.784 1.784 0 0 1 1.546.888l3.943 6.843"></path>
+    <path d="m13.378 9.633 4.096 1.098 1.097-4.096"></path>
+  </svg>
+`;
+
+const RECYCLE_SVG_12PX_WHITE = `
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display: block;">
+    <path d="M7 19H4.815a1.83 1.83 0 0 1-1.57-.881 1.785 1.785 0 0 1-.004-1.784L7.196 9.5"></path>
+    <path d="M11 19h8.203a1.83 1.83 0 0 0 1.556-.89 1.784 1.784 0 0 0 0-1.775l-1.226-2.12"></path>
+    <path d="m14 16-3 3 3 3"></path>
+    <path d="M8.293 13.596 7.196 9.5 3.1 10.598"></path>
+    <path d="m9.344 5.811 1.093-1.892A1.83 1.83 0 0 1 11.985 3a1.784 1.784 0 0 1 1.546.888l3.943 6.843"></path>
+    <path d="m13.378 9.633 4.096 1.098 1.097-4.096"></path>
+  </svg>
+`;
+
+// Iconic Mr. Bean Lime-Green Mini Cooper with Matte-Black Hood SVG + Dynamic Reactive Lighting
+const MR_BEAN_MINI_COOPER_HTML = `
+  <div id="eco-mr-bean-mini" style="
+    width: 72px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: none !important;
+    will-change: transform;
+    pointer-events: none;
+  ">
+    <svg width="72" height="36" viewBox="-18 -8 72 36" fill="none" xmlns="http://www.w3.org/2000/svg" style="display: block; overflow: visible; filter: drop-shadow(0 2.5px 4.5px rgba(15,23,42,0.38)); pointer-events: none;">
+      <defs>
+        <!-- Front Headlight Beams: Warm-yellow (#FEF08A -> transparent) projecting ~22px forward -->
+        <linearGradient id="mini-headlight-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stop-color="#FEF08A" stop-opacity="0.85" />
+          <stop offset="30%" stop-color="#FEF08A" stop-opacity="0.5" />
+          <stop offset="70%" stop-color="#FEF08A" stop-opacity="0.18" />
+          <stop offset="100%" stop-color="#FEF08A" stop-opacity="0" />
+        </linearGradient>
+
+        <!-- Rear Brake Light Soft Outer Blooms -->
+        <radialGradient id="mini-brake-bloom-top" cx="2.2" cy="5.2" r="7" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stop-color="#EF4444" stop-opacity="0.85" />
+          <stop offset="50%" stop-color="#EF4444" stop-opacity="0.35" />
+          <stop offset="100%" stop-color="#EF4444" stop-opacity="0" />
+        </radialGradient>
+        <radialGradient id="mini-brake-bloom-bot" cx="2.2" cy="14.8" r="7" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stop-color="#EF4444" stop-opacity="0.85" />
+          <stop offset="50%" stop-color="#EF4444" stop-opacity="0.35" />
+          <stop offset="100%" stop-color="#EF4444" stop-opacity="0" />
+        </radialGradient>
+      </defs>
+
+      <!-- Front Headlight Beams (Dynamic: 2 soft warm-yellow light cones projecting ~22px forward) -->
+      <g class="car-headlights" style="opacity: 0; transition: opacity 220ms ease-in-out; pointer-events: none;">
+        <!-- Upper cone (from cx=32, cy=5 projecting ~22px to x=54) -->
+        <polygon points="32,4.2 54,0.5 54,9.5 32,5.8" fill="url(#mini-headlight-grad)" />
+        <!-- Lower cone (from cx=32, cy=15 projecting ~22px to x=54) -->
+        <polygon points="32,14.2 54,10.5 54,19.5 32,15.8" fill="url(#mini-headlight-grad)" />
+        <!-- High-intensity illuminated bulb cores -->
+        <circle cx="32" cy="5" r="1.6" fill="#FFFFFF" />
+        <circle cx="32" cy="15" r="1.6" fill="#FFFFFF" />
+      </g>
+
+      <!-- Rear Brake Lights (Dynamic: crisp glowing crimson taillights with soft red outer bloom) -->
+      <g class="car-brakelights" style="opacity: 0; transition: opacity 180ms ease-in-out; pointer-events: none;">
+        <!-- Soft red outer blooms -->
+        <circle cx="2.2" cy="5.2" r="7" fill="url(#mini-brake-bloom-top)" />
+        <circle cx="2.2" cy="14.8" r="7" fill="url(#mini-brake-bloom-bot)" />
+        <!-- Crisp glowing crimson taillights -->
+        <rect x="1.5" y="3.8" width="1.8" height="2.8" rx="0.7" fill="#EF4444" stroke="#FCA5A5" stroke-width="0.5" />
+        <rect x="1.5" y="13.4" width="1.8" height="2.8" rx="0.7" fill="#EF4444" stroke="#FCA5A5" stroke-width="0.5" />
+      </g>
+
+      <!-- 4 Compact Black Wheels -->
+      <rect x="5" y="0.5" width="6.5" height="2.5" rx="1.2" fill="#0F172A" />
+      <rect x="5" y="17" width="6.5" height="2.5" rx="1.2" fill="#0F172A" />
+      <rect x="23" y="0.5" width="6.5" height="2.5" rx="1.2" fill="#0F172A" />
+      <rect x="23" y="17" width="6.5" height="2.5" rx="1.2" fill="#0F172A" />
+
+      <!-- Side Mirrors -->
+      <rect x="20.5" y="0" width="1.8" height="1.8" rx="0.9" fill="#1E293B" />
+      <rect x="20.5" y="18.2" width="1.8" height="1.8" rx="0.9" fill="#1E293B" />
+
+      <!-- Main Boxy Mini Cooper Body (Lime Green with subtle #4D7C0F outline) -->
+      <rect x="2.5" y="2" width="31" height="16" rx="3.5" fill="#84CC16" stroke="#4D7C0F" stroke-width="1.2" />
+
+      <!-- Signature Matte-Black Hood (#1E293B) -->
+      <path d="M 23 2.5 H 29.5 Q 33 2.5 33 6 V 14 Q 33 17.5 29.5 17.5 H 23 Z" fill="#1E293B" />
+
+      <!-- Wraparound Front Windshield (#0F172A) -->
+      <path d="M 20.5 3.5 Q 22.5 10 20.5 16.5 L 18.5 16.5 Q 20.5 10 18.5 3.5 Z" fill="#0F172A" />
+
+      <!-- Lime Green Roof (#A3E635) -->
+      <rect x="8" y="4" width="10.5" height="12" rx="1.5" fill="#A3E635" />
+
+      <!-- Rear Windshield (#0F172A) -->
+      <rect x="5.5" y="4.5" width="2" height="11" rx="1" fill="#0F172A" />
+
+      <!-- Round White/Pale Yellow Headlights (#FEF9C3) -->
+      <circle cx="32" cy="5" r="1.3" fill="#FEF9C3" stroke="#CBD5E1" stroke-width="0.5" />
+      <circle cx="32" cy="15" r="1.3" fill="#FEF9C3" stroke="#CBD5E1" stroke-width="0.5" />
+
+      <!-- Taillights -->
+      <rect x="2.2" y="4.2" width="1" height="2" rx="0.5" fill="#EF4444" />
+      <rect x="2.2" y="13.8" width="1" height="2" rx="0.5" fill="#EF4444" />
+    </svg>
+  </div>
+`;
+
 function buildNodeHoverHtml({
   node,
   metric = 'time',
@@ -146,11 +281,11 @@ function buildNodeHoverHtml({
     const pathStr = pathNodes.join(' → ');
 
     return `
-      <div class="p-2.5 text-left font-sans text-slate-800" style="min-width: 250px; max-width: 290px;">
+      <div class="p-2.5 text-left font-sans text-slate-800 pointer-events-none select-none" style="min-width: 250px; max-width: 290px; pointer-events: none; user-select: none;">
         <div class="flex items-center justify-between pb-1.5 mb-1.5 border-b border-slate-100">
           <div class="flex items-center gap-1.5">
             <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background-color: ${catColor};"></span>
-            <span class="font-extrabold text-xs text-slate-900">${node.name.startsWith(node.id) ? node.name : `${node.id}: ${node.name}`}</span>
+            <span class="font-extrabold text-xs text-slate-900">${getNodeDisplayLabel(node)}</span>
           </div>
           <span class="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
             Pickup
@@ -168,7 +303,7 @@ function buildNodeHoverHtml({
             <div class="bg-emerald-50/90 p-2 rounded-lg border border-emerald-200 text-emerald-950">
               <span class="text-[9px] uppercase font-bold text-emerald-800 block">🎯 Target</span>
               <div class="font-extrabold text-xs text-emerald-900 mt-0.5 truncate" title="${destName}">${destName}</div>
-              <span class="text-[10px] font-mono text-emerald-700">${formatCost(costVal, unit)}</span>
+              <span class="text-[10px] font-mono text-emerald-700">${formatCost(costVal, ` ${unit}`)}</span>
             </div>
           </div>
 
@@ -186,7 +321,7 @@ function buildNodeHoverHtml({
         </div>
 
         <div class="mt-1.5 text-[9.5px] text-emerald-700 font-semibold text-center bg-emerald-50/70 py-0.5 rounded border border-emerald-100 flex items-center justify-center gap-1">
-          <span>🔍 Click pin to inspect algorithm steps</span>
+          <span>🔍 Click node to inspect algorithm steps</span>
         </div>
       </div>
     `;
@@ -209,20 +344,22 @@ function buildNodeHoverHtml({
     try {
       accepted = Array.isArray(node.accepted_types) ? node.accepted_types : JSON.parse(node.accepted_types || '[]');
     } catch (e) {
-      accepted = ['Batteries', 'Smartphones'];
+      accepted = ['Batteries', 'Smartphones', 'Computers', 'Appliances'];
     }
 
     const pct = Math.min(100, Math.round((used / maxCap) * 100));
 
     return `
-      <div class="p-2.5 text-left font-sans text-slate-800" style="min-width: 250px; max-width: 290px;">
+      <div class="p-2.5 text-left font-sans text-slate-800 pointer-events-none select-none" style="min-width: 250px; max-width: 290px; pointer-events: none; user-select: none;">
         <div class="flex items-center justify-between pb-1.5 mb-1.5 border-b border-slate-100">
           <div class="flex items-center gap-1.5">
-            <span class="w-3 h-3 rounded bg-emerald-600 shrink-0 flex items-center justify-center text-white text-[8px] font-bold">R</span>
-            <span class="font-extrabold text-xs text-slate-900">${node.name.startsWith(node.id) ? node.name : `${node.id}: ${node.name}`}</span>
+            <span class="w-3.5 h-3.5 rounded-[4px] bg-emerald-600 shrink-0 flex items-center justify-center text-white">
+              ${RECYCLE_SVG_12PX}
+            </span>
+            <span class="font-extrabold text-xs text-slate-900">${getNodeDisplayLabel(node)}</span>
           </div>
           <span class="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">
-            Centre
+            Recycling Centre
           </span>
         </div>
 
@@ -230,14 +367,14 @@ function buildNodeHoverHtml({
           <!-- Capacity Gauge -->
           <div class="bg-slate-50 p-2 rounded-lg border border-slate-200/80 space-y-1">
             <div class="flex items-center justify-between">
-              <span class="text-[9px] uppercase font-bold text-slate-400">Capacity</span>
+              <span class="text-[9px] uppercase font-bold text-slate-400">Live Capacity</span>
               <span class="font-extrabold text-emerald-700 text-xs">${used} / ${maxCap} kg</span>
             </div>
             <div class="w-full h-1.5 rounded-full bg-slate-200 overflow-hidden">
               <div class="h-full bg-emerald-500 rounded-full transition-all" style="width: ${pct}%;"></div>
             </div>
             <div class="flex items-center justify-between text-[10px] text-slate-500 font-medium">
-              <span>${pct}% used</span>
+              <span>${pct}% filled</span>
               <span class="text-emerald-700 font-bold">${freeCap} kg free</span>
             </div>
           </div>
@@ -246,16 +383,16 @@ function buildNodeHoverHtml({
           <div class="p-1.5 rounded-lg bg-slate-50 border border-slate-100 space-y-0.5">
             <span class="text-[9px] uppercase font-bold text-slate-400 block">Accepted Streams:</span>
             <div class="flex flex-wrap gap-1">
-              ${accepted.map(t => `<span class="px-1 py-0.5 rounded text-[9.5px] font-medium bg-white border border-slate-200 text-slate-700">${t}</span>`).join('')}
+              ${accepted.map((t) => `<span class="px-1 py-0.5 rounded text-[9.5px] font-medium bg-white border border-slate-200 text-slate-700">${t}</span>`).join('')}
             </div>
           </div>
 
           <!-- Inbound Pickups -->
           ${inbound.length > 0 ? `
             <div class="p-1.5 rounded-lg bg-emerald-50/80 border border-emerald-200 text-emerald-950 space-y-0.5">
-              <span class="text-[9px] uppercase font-bold text-emerald-800 block">Assigned Pickups:</span>
+              <span class="text-[9px] uppercase font-bold text-emerald-800 block">Assigned Inbound:</span>
               <div class="text-[10px] font-semibold text-emerald-900">
-                ${inbound.map(a => `${a.pickup_name} (${a.weight_kg}kg)`).join(', ')}
+                ${inbound.map((a) => `${a.pickup_name} (${a.weight_kg}kg)`).join(', ')}
               </div>
             </div>
           ` : `
@@ -264,27 +401,22 @@ function buildNodeHoverHtml({
         </div>
       </div>
     `;
-            <div class="text-[10.5px] text-slate-400 italic">No pickups currently assigned</div>
-          `}
-        </div>
-      </div>
-    `;
   }
 
   // Junction
   return `
-    <div class="p-3 text-left font-sans text-slate-800" style="min-width: 240px; max-width: 280px;">
+    <div class="p-3 text-left font-sans text-slate-800 pointer-events-none select-none" style="min-width: 240px; max-width: 280px; pointer-events: none; user-select: none;">
       <div class="flex items-center justify-between pb-1.5 mb-1.5 border-b border-slate-100">
         <div class="flex items-center gap-1.5">
-          <span class="w-2.5 h-2.5 rounded-full border border-slate-400 bg-slate-500 shrink-0"></span>
-          <span class="font-extrabold text-sm text-slate-900">${node.name.startsWith(node.id) ? node.name : `${node.id}: ${node.name}`}</span>
+          <span class="w-2.5 h-2.5 rounded-full border border-slate-500 bg-white shrink-0"></span>
+          <span class="font-extrabold text-sm text-slate-900">${getNodeDisplayLabel(node)}</span>
         </div>
         <span class="text-[9.5px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
           Transit Junction
         </span>
       </div>
       <p class="text-xs text-slate-600 leading-snug">
-        Arterial highway intersection facilitating multi-segment Dijkstra shortest path routing across Delhi NCR.
+        Arterial highway intersection connecting shortest path routing across Delhi NCR.
       </p>
     </div>
   `;
@@ -301,12 +433,15 @@ export default function MapCanvas({
   playbackSpeed = 1,
   previousPath = null,
   allocations = [],
+  isPlaying = false,
+  isRunAll = false,
   onSelectPickup = () => {},
   onMetricChange = () => {},
   onSelectEdge = () => {},
   onCreatePickup = () => {},
   onCreateCentre = () => {},
   onConnectNodes = () => {},
+  onVehicleFinish = () => {},
 }) {
   const outerContainerRef = useRef(null);
   const mapContainerRef = useRef(null);
@@ -317,14 +452,33 @@ export default function MapCanvas({
   // Hover Tooltip Popup Reference
   const hoverPopupRef = useRef(null);
 
-  // Vehicle Animation Marker
+  // Snake Traversal Animation Refs
+  const snakeArrowMarkerRef = useRef(null);
+  const snakeAnimFrameRef = useRef(null);
+  const animatingEdgeIdRef = useRef(null);
+
+  // Vehicle Animation State & Refs
+  const [isCarDriving, setIsCarDriving] = useState(false);
+  const isCarDrivingRef = useRef(false);
+  isCarDrivingRef.current = isCarDriving;
   const carMarkerRef = useRef(null);
   const carAnimFrameRef = useRef(null);
+  const lastDrivenStepKeyRef = useRef(null);
+  const arrivalTimeoutRef = useRef(null);
+
+  // Helper to toggle Mr. Bean's Mini Cooper headlights and brake lights with zero React re-renders
+  const setCarLights = useCallback((headlightsOn, brakeLightsOn) => {
+    const el = carMarkerRef.current?.getElement();
+    if (!el) return;
+    const hl = el.querySelector('.car-headlights');
+    const bl = el.querySelector('.car-brakelights');
+    if (hl) hl.style.opacity = headlightsOn ? '1' : '0';
+    if (bl) bl.style.opacity = brakeLightsOn ? '1' : '0';
+  }, []);
 
   // Markers references
   const nodeMarkersRef = useRef({});
   const midpointMarkersRef = useRef({});
-  const watermarkMarkersRef = useRef([]);
   const searchPinMarkerRef = useRef(null);
 
   // Modes & Interaction
@@ -347,6 +501,9 @@ export default function MapCanvas({
   const [newPickupCategory, setNewPickupCategory] = useState('Batteries');
   const [newPickupWeight, setNewPickupWeight] = useState(12);
   const [newCentreCapacity, setNewCentreCapacity] = useState(25);
+  const [selectedStreams, setSelectedStreams] = useState(ALL_STREAMS);
+  const selectedStreamsRef = useRef(selectedStreams);
+  selectedStreamsRef.current = selectedStreams;
 
   // Current Step resolution
   const step = walkthroughStep || activeStep || {};
@@ -443,6 +600,8 @@ export default function MapCanvas({
   onConnectNodesRef.current = onConnectNodes;
   const onSelectPickupRef = useRef(onSelectPickup);
   onSelectPickupRef.current = onSelectPickup;
+  const onVehicleFinishRef = useRef(onVehicleFinish);
+  onVehicleFinishRef.current = onVehicleFinish;
   const metricRef = useRef(metric);
   metricRef.current = metric;
   const centreCapacitiesRef = useRef(centreCapacities);
@@ -457,205 +616,272 @@ export default function MapCanvas({
   newPickupWeightRef.current = newPickupWeight;
   const newCentreCapacityRef = useRef(newCentreCapacity);
   newCentreCapacityRef.current = newCentreCapacity;
+  const nodesMapRef = useRef(nodesMap);
+  nodesMapRef.current = nodesMap;
+  const playbackSpeedRef = useRef(playbackSpeed);
+  playbackSpeedRef.current = playbackSpeed;
+  const activePathNodesRef = useRef(activePathNodes);
+  activePathNodesRef.current = activePathNodes;
 
+  // Show toast notification helper
   const showToast = useCallback((msg, type = 'info') => {
     setToastMessage(msg);
     setToastType(type);
     setTimeout(() => {
-      setToastMessage((prev) => (prev === msg ? null : prev));
-    }, 4000);
+      setToastMessage((current) => (current === msg ? null : current));
+    }, 4500);
   }, []);
 
   const showToastRef = useRef(showToast);
   showToastRef.current = showToast;
 
-  // 1. Camera Auto-Fit Nodes Function
-  const fitAllNodes = useCallback((map = mapRef.current, duration = 1000) => {
-    const targetMap = map || mapRef.current;
-    if (!targetMap) return;
-    const currentNodes = nodesRef.current || [];
-    const validNodes = currentNodes.filter((n) => n.lat != null && n.lng != null);
-    if (validNodes.length === 0) return;
-
-    let minLng = Infinity;
-    let maxLng = -Infinity;
-    let minLat = Infinity;
-    let maxLat = -Infinity;
-
-    validNodes.forEach((n) => {
-      const lng = Number(n.lng);
-      const lat = Number(n.lat);
-      if (lng < minLng) minLng = lng;
-      if (lng > maxLng) maxLng = lng;
-      if (lat < minLat) minLat = lat;
-      if (lat > maxLat) maxLat = lat;
-    });
-
-    targetMap.fitBounds(
-      [
-        [minLng, minLat],
-        [maxLng, maxLat],
-      ],
-      {
-        padding: { top: 140, bottom: 85, left: 75, right: 75 },
-        maxZoom: 10.95,
-        duration,
+  // Toggle accepted streams for centre creation (prevents deselecting the very last remaining stream)
+  const handleToggleStream = useCallback((stream) => {
+    setSelectedStreams((prev) => {
+      if (prev.includes(stream)) {
+        if (prev.length <= 1) {
+          showToast('Centre must accept at least one stream.', 'info');
+          return prev;
+        }
+        return prev.filter((s) => s !== stream);
+      } else {
+        return [...prev, stream];
       }
-    );
+    });
+  }, [showToast]);
+
+  // Mutually exclusive interaction modes helper
+  const handleSelectMode = useCallback((nextMode) => {
+    setMode((prev) => (prev === nextMode && nextMode !== 'inspect' ? 'inspect' : nextMode));
+    setConnectSourceNode(null);
+    if (hoverPopupRef.current) {
+      hoverPopupRef.current.remove();
+    }
+    setSearchDropdownOpen(false);
+    if (nextMode === 'connect_road') {
+      showToast('Click 1st node to begin straight road connection.', 'info');
+    }
+  }, [showToast]);
+
+  // Fit bounds helper - uses nodesRef.current so dependency array is strictly empty
+  const fitAllNodes = useCallback((map, duration = 600) => {
+    const targetMap = map || mapRef.current;
+    const currentNodes = nodesRef.current || [];
+    if (!targetMap || currentNodes.length === 0) return;
+    const bounds = new maplibregl.LngLatBounds();
+    currentNodes.forEach((n) => {
+      if (n.lat != null && n.lng != null) {
+        bounds.extend([Number(n.lng), Number(n.lat)]);
+      }
+    });
+    if (!bounds.isEmpty()) {
+      targetMap.fitBounds(bounds, {
+        padding: { top: 145, bottom: 70, left: 72, right: 72 },
+        maxZoom: 12.5,
+        duration,
+      });
+    }
   }, []);
 
-  // Auto-fit bounds when nodes are loaded from API
+  // Auto-fit bounds on initial load
   const hasInitialFitRef = useRef(false);
   useEffect(() => {
     if (mapInstance && isMapLoaded && nodes.length > 0 && !hasInitialFitRef.current) {
       hasInitialFitRef.current = true;
-      const timer = setTimeout(() => {
-        fitAllNodes(mapInstance, 600);
-      }, 150);
-      return () => clearTimeout(timer);
+      fitAllNodes(mapInstance, 0);
     }
   }, [mapInstance, isMapLoaded, nodes.length, fitAllNodes]);
 
-  // 2. Ensure Graph GeoJSON Source & Line Layers on Map
+  // 2. Ensure Graph GeoJSON Sources & Line Layers on Map (ZERO filter expressions)
   const ensureGraphLayers = useCallback((map) => {
-    if (!map) return;
+    const targetMap = map || mapRef.current;
+    if (!targetMap || !targetMap.isStyleLoaded()) return;
 
-    if (!map.getSource('graph-edges')) {
-      map.addSource('graph-edges', {
+    // 1. edges-base-source & layers: edges-casing FIRST, then edges-base on top
+    if (!targetMap.getSource('edges-base-source')) {
+      targetMap.addSource('edges-base-source', {
         type: 'geojson',
         data: { type: 'FeatureCollection', features: [] },
       });
     }
-
-    // edges-casing: subtle crisp white casing directly below edges-base, #FFFFFF, line-opacity: 0.92
-    if (!map.getLayer('edges-casing')) {
-      map.addLayer({
+    if (!targetMap.getLayer('edges-casing')) {
+      targetMap.addLayer({
         id: 'edges-casing',
         type: 'line',
-        source: 'graph-edges',
+        source: 'edges-base-source',
         layout: {
           'line-cap': 'round',
           'line-join': 'round',
         },
         paint: {
           'line-color': '#FFFFFF',
-          'line-width': [
-            'case',
-            ['==', ['get', 'state'], 'route'],
-            8.5,
-            ['==', ['get', 'state'], 'active'],
-            7.5,
-            ['==', ['get', 'state'], 'spt'],
-            6.5,
-            5.5,
-          ],
-          'line-opacity': 0.92,
+          'line-width': 4.0,
+          'line-opacity': 0.9,
         },
       });
     }
-
-    // edges-base: sharp medium slate #7C8EA6, line-width: 2.6, line-opacity: 0.85
-    if (!map.getLayer('edges-base')) {
-      map.addLayer({
+    if (!targetMap.getLayer('edges-base')) {
+      targetMap.addLayer({
         id: 'edges-base',
         type: 'line',
-        source: 'graph-edges',
-        filter: ['==', ['get', 'state'], 'base'],
+        source: 'edges-base-source',
         layout: {
           'line-cap': 'round',
           'line-join': 'round',
         },
         paint: {
-          'line-color': '#7C8EA6',
-          'line-width': 2.6,
-          'line-opacity': 0.85,
+          'line-color': '#94A3B8',
+          'line-width': 1.8,
+          'line-opacity': 0.68,
         },
       });
     }
 
-    // edges-spt: vivid sky #0EA5E9, line-width: 3.6
-    if (!map.getLayer('edges-spt')) {
-      map.addLayer({
+    // 2. edges-rejected-source & layer: edges-rejected
+    if (!targetMap.getSource('edges-rejected-source')) {
+      targetMap.addSource('edges-rejected-source', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+      });
+    }
+    if (!targetMap.getLayer('edges-rejected')) {
+      targetMap.addLayer({
+        id: 'edges-rejected',
+        type: 'line',
+        source: 'edges-rejected-source',
+        layout: {
+          'line-cap': 'round',
+          'line-join': 'round',
+        },
+        paint: {
+          'line-color': '#94A3B8',
+          'line-width': 2.0,
+          'line-dasharray': [2, 2],
+          'line-opacity': 0.7,
+        },
+      });
+    }
+
+    // 3. edges-spt-source & layer: edges-spt
+    if (!targetMap.getSource('edges-spt-source')) {
+      targetMap.addSource('edges-spt-source', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+      });
+    }
+    if (!targetMap.getLayer('edges-spt')) {
+      targetMap.addLayer({
         id: 'edges-spt',
         type: 'line',
-        source: 'graph-edges',
-        filter: ['==', ['get', 'state'], 'spt'],
+        source: 'edges-spt-source',
         layout: {
           'line-cap': 'round',
           'line-join': 'round',
         },
         paint: {
-          'line-color': '#0EA5E9',
-          'line-width': 3.6,
-          'line-opacity': 0.95,
+          'line-color': '#0F172A',
+          'line-width': 3.0,
         },
       });
     }
 
-    // edges-active: glowing amber #F59E0B, line-width: 4.8
-    if (!map.getLayer('edges-active')) {
-      map.addLayer({
-        id: 'edges-active',
-        type: 'line',
-        source: 'graph-edges',
-        filter: ['==', ['get', 'state'], 'active'],
-        layout: {
-          'line-cap': 'round',
-          'line-join': 'round',
-        },
-        paint: {
-          'line-color': '#F59E0B',
-          'line-width': 4.8,
-          'line-opacity': 1.0,
-        },
+    // 4. edges-blocked-source & layer: edges-blocked
+    if (!targetMap.getSource('edges-blocked-source')) {
+      targetMap.addSource('edges-blocked-source', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
       });
     }
-
-    // edges-route: rich emerald #059669, line-width: 5.4
-    if (!map.getLayer('edges-route')) {
-      map.addLayer({
-        id: 'edges-route',
-        type: 'line',
-        source: 'graph-edges',
-        filter: ['==', ['get', 'state'], 'route'],
-        layout: {
-          'line-cap': 'round',
-          'line-join': 'round',
-        },
-        paint: {
-          'line-color': '#059669',
-          'line-width': 5.4,
-          'line-opacity': 1.0,
-        },
-      });
-    }
-
-    // edges-blocked: rose #EF4444, line-width: 3.2, line-dasharray: [2, 2]
-    if (!map.getLayer('edges-blocked')) {
-      map.addLayer({
+    if (!targetMap.getLayer('edges-blocked')) {
+      targetMap.addLayer({
         id: 'edges-blocked',
         type: 'line',
-        source: 'graph-edges',
-        filter: ['==', ['get', 'state'], 'blocked'],
+        source: 'edges-blocked-source',
         layout: {
           'line-cap': 'round',
           'line-join': 'round',
         },
         paint: {
           'line-color': '#EF4444',
-          'line-width': 3.2,
+          'line-width': 2.4,
           'line-dasharray': [2, 2],
-          'line-opacity': 0.9,
         },
       });
     }
 
-    // edges-hit: transparent line-width: 22, line-opacity: 0.01 for reliable Inspect clicking
-    if (!map.getLayer('edges-hit')) {
-      map.addLayer({
+    // 5. edges-traversing-source & layer: edges-traversing
+    if (!targetMap.getSource('edges-traversing-source')) {
+      targetMap.addSource('edges-traversing-source', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+      });
+    }
+    if (!targetMap.getLayer('edges-traversing')) {
+      targetMap.addLayer({
+        id: 'edges-traversing',
+        type: 'line',
+        source: 'edges-traversing-source',
+        layout: {
+          'line-cap': 'round',
+          'line-join': 'round',
+        },
+        paint: {
+          'line-color': '#0F172A',
+          'line-width': 3.6,
+        },
+      });
+    }
+
+    // 6. edges-route-drawn-source & layers: edges-route-casing FIRST, then edges-route-drawn on top
+    if (!targetMap.getSource('edges-route-drawn-source')) {
+      targetMap.addSource('edges-route-drawn-source', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+      });
+    }
+    if (!targetMap.getLayer('edges-route-casing')) {
+      targetMap.addLayer({
+        id: 'edges-route-casing',
+        type: 'line',
+        source: 'edges-route-drawn-source',
+        layout: {
+          'line-cap': 'round',
+          'line-join': 'round',
+        },
+        paint: {
+          'line-color': '#FFFFFF',
+          'line-width': 7.0,
+        },
+      });
+    }
+    if (!targetMap.getLayer('edges-route-drawn')) {
+      targetMap.addLayer({
+        id: 'edges-route-drawn',
+        type: 'line',
+        source: 'edges-route-drawn-source',
+        layout: {
+          'line-cap': 'round',
+          'line-join': 'round',
+        },
+        paint: {
+          'line-color': '#059669',
+          'line-width': 4.2,
+        },
+      });
+    }
+
+    // 7. edges-hit-source & layer: edges-hit on top for Inspect road clicks
+    if (!targetMap.getSource('edges-hit-source')) {
+      targetMap.addSource('edges-hit-source', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+      });
+    }
+    if (!targetMap.getLayer('edges-hit')) {
+      targetMap.addLayer({
         id: 'edges-hit',
         type: 'line',
-        source: 'graph-edges',
+        source: 'edges-hit-source',
         layout: {
           'line-cap': 'round',
           'line-join': 'round',
@@ -663,81 +889,122 @@ export default function MapCanvas({
         paint: {
           'line-color': '#000000',
           'line-width': 22.0,
-          'line-opacity': 0.01,
+          'line-opacity': 0.001,
         },
       });
     }
   }, []);
 
-  // 3. Update Graph GeoJSON Source with straight lines connecting nodes
-  const updateGraphSource = useCallback(
-    (map, currentEdges, currentNodes) => {
-      if (!map) return;
-      ensureGraphLayers(map);
-      const source = map.getSource('graph-edges');
-      if (!source) return;
+  // 3. Update Graph GeoJSON Sources with zero MapLibre filter expressions
+  const updateAllEdgeSources = useCallback(
+    (map, currentEdges, currentNodes, excludedEdgeId = null) => {
+      const targetMap = map || mapRef.current;
+      if (!targetMap || !targetMap.isStyleLoaded()) return;
+      ensureGraphLayers(targetMap);
+
+      const baseSource = targetMap.getSource('edges-base-source');
+      const hitSource = targetMap.getSource('edges-hit-source');
+      const blockedSource = targetMap.getSource('edges-blocked-source');
+      const sptSource = targetMap.getSource('edges-spt-source');
+      const rejectedSource = targetMap.getSource('edges-rejected-source');
+      const routeDrawnSource = targetMap.getSource('edges-route-drawn-source');
+
+      if (!baseSource || !hitSource) return;
 
       const nMap = {};
-      currentNodes.forEach((n) => {
+      (currentNodes || []).forEach((n) => {
         nMap[n.id] = n;
       });
 
-      const features = currentEdges
-        .map((edge) => {
-          const u = nMap[edge.source_id];
-          const v = nMap[edge.target_id];
-          if (!u || !v || u.lat == null || u.lng == null || v.lat == null || v.lng == null) {
-            return null;
+      const predecessors = step.predecessors || {};
+      const isAllSummary = activePickupId === null || activePickupId === 'ALL';
+
+      const baseFeatures = [];
+      const hitFeatures = [];
+      const blockedFeatures = [];
+      const sptFeatures = [];
+      const rejectedFeatures = [];
+      const allSummaryRouteFeatures = [];
+
+      (currentEdges || []).forEach((edge) => {
+        const u = nMap[edge.source_id];
+        const v = nMap[edge.target_id];
+        if (!u || !v || u.lat == null || u.lng == null || v.lat == null || v.lng == null) {
+          return;
+        }
+
+        const feature = {
+          type: 'Feature',
+          properties: {
+            id: edge.id,
+            source_id: edge.source_id,
+            target_id: edge.target_id,
+            base_distance_km: edge.base_distance_km,
+            base_time_min: edge.base_time_min,
+            is_blocked: edge.is_blocked ? 1 : 0,
+            traffic_factor: edge.traffic_factor || 1.0,
+          },
+          geometry: {
+            type: 'LineString',
+            coordinates: [
+              [Number(u.lng), Number(u.lat)],
+              [Number(v.lng), Number(v.lat)],
+            ],
+          },
+        };
+
+        // Every road is in base source and hit source immediately at Step 1
+        baseFeatures.push(feature);
+        hitFeatures.push(feature);
+
+        // Blocked edges
+        if (edge.is_blocked || previousPathEdgesSet.has(edge.id)) {
+          blockedFeatures.push(feature);
+          return;
+        }
+
+        // Prevent Instant Snapping: EXCLUDE (u -> v) from static sources while animating
+        const isAnimatingThisEdge =
+          excludedEdgeId &&
+          (edge.id === excludedEdgeId ||
+            (edge.source_id === step.from_node && edge.target_id === step.to_node) ||
+            (edge.source_id === step.to_node && edge.target_id === step.from_node));
+
+        if (isAllSummary) {
+          if (activePathEdgesSet.has(edge.id)) {
+            allSummaryRouteFeatures.push(feature);
           }
+        } else {
+          const uId = edge.source_id;
+          const vId = edge.target_id;
+          const inSPT = predecessors[vId] === uId || predecessors[uId] === vId;
 
-          // State determination: blocked > route > active > spt > base
-          let edgeState = 'base';
-          if (edge.is_blocked) {
-            edgeState = 'blocked';
-          } else if (activePathEdgesSet.has(edge.id)) {
-            edgeState = 'route';
-          } else if (
-            edge.id === activeEdgeId ||
-            (activeFromNode === edge.source_id && activeToNode === edge.target_id) ||
-            (activeFromNode === edge.target_id && activeToNode === edge.source_id)
-          ) {
-            edgeState = 'active';
-          } else if (visitedNodes.has(edge.source_id) && visitedNodes.has(edge.target_id)) {
-            edgeState = 'spt';
-          } else if (previousPathEdgesSet.has(edge.id)) {
-            edgeState = 'blocked';
+          if (inSPT) {
+            if (!isAnimatingThisEdge) {
+              sptFeatures.push(feature);
+            }
+          } else if (visitedNodes.has(uId) && visitedNodes.has(vId)) {
+            if (!isAnimatingThisEdge) {
+              rejectedFeatures.push(feature);
+            }
           }
-
-          return {
-            type: 'Feature',
-            properties: {
-              id: edge.id,
-              state: edgeState,
-              base_distance_km: edge.base_distance_km,
-              base_time_min: edge.base_time_min,
-              is_blocked: edge.is_blocked ? 1 : 0,
-              traffic_factor: edge.traffic_factor || 1.0,
-            },
-            geometry: {
-              type: 'LineString',
-              coordinates: [
-                [Number(u.lng), Number(u.lat)],
-                [Number(v.lng), Number(v.lat)],
-              ],
-            },
-          };
-        })
-        .filter(Boolean);
-
-      source.setData({
-        type: 'FeatureCollection',
-        features,
+        }
       });
+
+      baseSource.setData({ type: 'FeatureCollection', features: baseFeatures });
+      hitSource.setData({ type: 'FeatureCollection', features: hitFeatures });
+      if (blockedSource) blockedSource.setData({ type: 'FeatureCollection', features: blockedFeatures });
+      if (sptSource) sptSource.setData({ type: 'FeatureCollection', features: sptFeatures });
+      if (rejectedSource) rejectedSource.setData({ type: 'FeatureCollection', features: rejectedFeatures });
+
+      if (isAllSummary && routeDrawnSource) {
+        routeDrawnSource.setData({ type: 'FeatureCollection', features: allSummaryRouteFeatures });
+      }
     },
-    [ensureGraphLayers, activePathEdgesSet, activeEdgeId, activeFromNode, activeToNode, visitedNodes, previousPathEdgesSet]
+    [ensureGraphLayers, step, activePickupId, activePathEdgesSet, previousPathEdgesSet, visitedNodes]
   );
 
-  // 4. Initialize MapLibre GL Map (Await getMutedMapStyle() BEFORE constructor, NEVER call setStyle())
+  // 4. Initialize MapLibre GL Map strictly ONCE on mount
   useEffect(() => {
     let isCancelled = false;
 
@@ -772,7 +1039,7 @@ export default function MapCanvas({
           setMapInstance(map);
 
           ensureGraphLayers(map);
-          updateGraphSource(map, edgesRef.current, nodesRef.current);
+          updateAllEdgeSources(map, edgesRef.current, nodesRef.current, null);
           fitAllNodes(map, 0);
 
           // Shared Node Hover Popup
@@ -839,7 +1106,7 @@ export default function MapCanvas({
                 waste_type: cat,
                 weight_kg: wt,
               });
-              showToastRef.current(`Placed new Pickup (${cat}, ${wt} kg)!`, 'success');
+              showToastRef.current(`Placed ${defaultName} (${cat}, ${wt} kg)!`, 'success');
               setMode('inspect');
             } catch (err) {
               showToastRef.current(`Failed to create pickup: ${err.message}`, 'error');
@@ -860,9 +1127,9 @@ export default function MapCanvas({
                 lat: roundedLat,
                 lng: roundedLng,
                 max_capacity_kg: cap,
-                accepted_types: ['Batteries', 'Smartphones', 'Computers', 'Appliances'],
+                accepted_types: selectedStreamsRef.current.length > 0 ? selectedStreamsRef.current : ALL_STREAMS,
               });
-              showToastRef.current(`Placed new Recycling Centre (${cap} kg)!`, 'success');
+              showToastRef.current(`Placed ${defaultName} (${cap} kg)!`, 'success');
               setMode('inspect');
             } catch (err) {
               showToastRef.current(`Failed to create centre: ${err.message}`, 'error');
@@ -878,80 +1145,52 @@ export default function MapCanvas({
 
     return () => {
       isCancelled = true;
+      if (snakeAnimFrameRef.current) {
+        cancelAnimationFrame(snakeAnimFrameRef.current);
+        snakeAnimFrameRef.current = null;
+      }
+      if (snakeArrowMarkerRef.current) {
+        snakeArrowMarkerRef.current.remove();
+        snakeArrowMarkerRef.current = null;
+      }
       if (carAnimFrameRef.current) {
         cancelAnimationFrame(carAnimFrameRef.current);
+        carAnimFrameRef.current = null;
       }
       if (hoverPopupRef.current) {
         hoverPopupRef.current.remove();
-        hoverPopupRef.current = null;
+      }
+      Object.keys(nodeMarkersRef.current).forEach((k) => {
+        nodeMarkersRef.current[k].remove();
+      });
+      nodeMarkersRef.current = {};
+      Object.keys(midpointMarkersRef.current).forEach((k) => {
+        midpointMarkersRef.current[k].remove();
+      });
+      midpointMarkersRef.current = {};
+      if (arrivalTimeoutRef.current) {
+        clearTimeout(arrivalTimeoutRef.current);
+        arrivalTimeoutRef.current = null;
+      }
+      stopAllSounds();
+      setCarLights(false, false);
+      if (carMarkerRef.current) {
+        carMarkerRef.current.remove();
+        carMarkerRef.current = null;
       }
       if (mapRef.current) {
         mapRef.current.remove();
         mapRef.current = null;
       }
     };
-  }, []); // Run ONCE on mount; clean up only on unmount (prevents map recreation blink loops)
+  }, []); // Strictly empty dependency array: map is initialized once and never destroyed during playback!
 
-  // Smooth two-finger touch / mousewheel pan handling
-  useEffect(() => {
-    const container = mapContainerRef.current;
-    if (!container) return;
-
-    const handleWheel = (e) => {
-      const map = mapRef.current;
-      if (!map) return;
-
-      if (e.ctrlKey || e.metaKey) {
-        e.preventDefault();
-        const factor = Math.exp(-e.deltaY * 0.003);
-        const nextZoom = Math.min(18, Math.max(8, map.getZoom() * factor));
-        map.setZoom(nextZoom);
-      } else {
-        e.preventDefault();
-        map.panBy([e.deltaX, e.deltaY], { duration: 0 });
-      }
-    };
-
-    container.addEventListener('wheel', handleWheel, { passive: false });
-    return () => {
-      container.removeEventListener('wheel', handleWheel);
-    };
-  }, []);
-
-  // Sync Graph Source on edge or state changes
+  // 5. Sync Graph GeoJSON Sources whenever edges, nodes, step, or activePickupId updates
   useEffect(() => {
     if (mapInstance && isMapLoaded) {
-      updateGraphSource(mapInstance, edges, nodes);
+      updateAllEdgeSources(mapInstance, edges, nodes, animatingEdgeIdRef.current);
     }
-  }, [mapInstance, isMapLoaded, edges, nodes, updateGraphSource]);
-
-  // 5. Region Watermarks (North Delhi, Central Delhi, etc.)
-  useEffect(() => {
-    if (!mapInstance || !isMapLoaded) return;
-
-    watermarkMarkersRef.current.forEach((m) => m.remove());
-    watermarkMarkersRef.current = [];
-
-    REGION_WATERMARKS.forEach((r) => {
-      const el = document.createElement('div');
-      el.className = 'region-watermark-pill select-none pointer-events-none';
-      el.innerHTML = `
-        <span class="text-[11px] font-extrabold uppercase tracking-widest text-slate-400/80 drop-shadow-xs">
-          ${r.name}
-        </span>
-      `;
-
-      const marker = new maplibregl.Marker({
-        element: el,
-        anchor: 'center',
-        subpixelPositioning: false,
-      })
-        .setLngLat([r.lng, r.lat])
-        .addTo(mapInstance);
-
-      watermarkMarkersRef.current.push(marker);
-    });
-  }, [mapInstance, isMapLoaded]);
+  }, [mapInstance, isMapLoaded, edges, nodes, step, activePickupId, updateAllEdgeSources]);
 
   // 6. Midpoint Edge Pills (Weights, Distance, Traffic) with z-index: 5
   useEffect(() => {
@@ -984,15 +1223,20 @@ export default function MapCanvas({
         (activeFromNode === edge.source_id && activeToNode === edge.target_id) ||
         (activeFromNode === edge.target_id && activeToNode === edge.source_id);
 
-      // Cost value formatting
+      // Cost value formatting: compact without trailing .0 (e.g. 8m, 26m, 14km)
       let displayCost = '';
       if (isBlocked) {
         displayCost = '⛔ Blocked';
       } else if (metric === 'time') {
-        const effectiveTime = edge.base_time_min * traffic;
-        displayCost = formatCost(effectiveTime, 'min');
+        const effectiveTime = (edge.base_time_min || 0) * traffic;
+        const rounded = Math.round(effectiveTime * 10) / 10;
+        const numStr = Number.isInteger(rounded) ? `${rounded}` : rounded.toFixed(1);
+        displayCost = `${numStr}m`;
       } else {
-        displayCost = formatCost(edge.base_distance_km, 'km');
+        const distKm = edge.base_distance_km || 0;
+        const rounded = Math.round(distKm * 10) / 10;
+        const numStr = Number.isInteger(rounded) ? `${rounded}` : rounded.toFixed(1);
+        displayCost = `${numStr}km`;
       }
 
       if (traffic > 1.0 && !isBlocked) {
@@ -1026,17 +1270,17 @@ export default function MapCanvas({
         onSelectEdgeRef.current(edge);
       };
 
-      let pillClass = 'bg-white text-slate-700 border-slate-300/80 shadow-xs hover:border-slate-400';
+      let pillClass = 'bg-white/95 text-slate-600 border-slate-200/90 shadow-2xs hover:border-slate-400';
       if (isBlocked) {
         pillClass = 'bg-rose-50 border-rose-300 text-rose-700 font-bold';
       } else if (isRoute) {
-        pillClass = 'bg-emerald-600 border-emerald-600 text-white font-bold shadow-sm';
+        pillClass = 'bg-emerald-600 border-emerald-600 text-white font-bold shadow-xs';
       } else if (isActiveRelaxation) {
-        pillClass = 'bg-amber-500 border-amber-500 text-white font-bold scale-110 shadow-sm ring-2 ring-amber-300/60';
+        pillClass = 'bg-amber-500 border-amber-500 text-white font-bold scale-105 shadow-xs';
       }
 
       pillEl.innerHTML = `
-        <div class="px-1.5 py-0.5 rounded-full text-[11px] font-medium whitespace-nowrap shadow-xs border transition-all edge-cost-pill ${pillClass}" style="font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums;">
+        <div class="px-1.5 py-0.5 rounded-full text-[10px] font-medium whitespace-nowrap border transition-all edge-cost-pill ${pillClass}" style="font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums;">
           ${displayCost}
         </div>
       `;
@@ -1053,7 +1297,7 @@ export default function MapCanvas({
     activeToNode,
   ]);
 
-  // 7. Render Node Markers (Pickups, Centres, Junctions) with z-index: 20
+  // 7. Render Node Markers (Compact Flat GIS SVG Markers & Haloed Labels)
   useEffect(() => {
     if (!mapInstance || !isMapLoaded) return;
 
@@ -1074,41 +1318,68 @@ export default function MapCanvas({
       const nodeKind = getNodeKind(node);
       const isPopped = currentPoppedNode === node.id;
       const isConnectSource = connectSourceNode && connectSourceNode.id === node.id;
+      const isActivePickup = activePickupId === node.id;
+      const isInActivePath = activePathNodesSet.has(node.id);
+      const isVisited = visitedNodes.has(node.id);
 
-      // Dijkstra Distance badge above node
+      // Contrast determination: Inactive pickups and junctions dimmed to 0.72
+      // Active pickup, path nodes, popped nodes, and recycling centres remain at full contrast 1.0
+      let nodeOpacity = 1.0;
+      if ((nodeKind === 'pickup' && !isActivePickup && !isInActivePath && !isPopped) ||
+          (nodeKind === 'junction' && !isInActivePath && !isPopped && !isVisited && !isConnectSource)) {
+        nodeOpacity = 0.72;
+      }
+
+      // Dijkstra Distance Cost Chip:
+      // Show tiny floating cost pills (0m, 8m, 17m) ONLY on nodes Dijkstra has discovered/relaxed
+      // Untouched infinity nodes remain completely unbadged
       const dist = dijkstraDistances[node.id];
-      const distBadge = dist != null ? formatCost(dist, metric === 'time' ? 'min' : 'km') : null;
+      let distBadge = '';
+      if (dist != null && Number.isFinite(Number(dist)) && Number(dist) < 9000 && activePickupId !== 'ALL') {
+        const rounded = Math.round(Number(dist) * 10) / 10;
+        const numStr = Number.isInteger(rounded) ? `${rounded}` : rounded.toFixed(1);
+        const unit = metric === 'time' ? 'm' : 'km';
+        distBadge = `<div class="mb-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-mono bg-white/95 border border-slate-200/90 text-slate-700 shadow-2xs edge-cost-pill leading-none pointer-events-none select-none" style="font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; pointer-events: none;">${numStr}${unit}</div>`;
+      }
 
-      // Centre capacity & single Greedy Decision Badge (active during Greedy/Confirm steps)
-      let centreSubLabel = '';
+      // Centre Decision Badges during Greedy evaluation and confirmation steps
       let greedyBadge = '';
       const isGreedyOrConfirm =
         step.event_type === 'greedy_eval' ||
-        step.event_type === 'route_confirm' ||
-        candidateChecklist.length > 0;
+        step.event_type === 'route_confirm';
 
-      if (nodeKind === 'centre' && isGreedyOrConfirm) {
-        const capObj = centreCapacities[node.id];
-        let usedVal = 0;
-        let maxCapVal = node.max_capacity_kg || 25;
-        if (typeof capObj === 'object' && capObj !== null) {
-          usedVal = capObj.used != null ? capObj.used : (capObj.max != null && capObj.remaining != null ? Math.max(0, capObj.max - capObj.remaining) : 0);
-          if (capObj.max != null) maxCapVal = capObj.max;
-        } else if (typeof capObj === 'number') {
-          usedVal = capObj;
-        }
-        centreSubLabel = `${usedVal}/${maxCapVal} kg`;
+      let isAssignedCentre = false;
 
+      if (nodeKind === 'centre') {
         const check = candidateChecklist.find((c) => c.centre_id === node.id);
-        if (check) {
-          if (check.status === 'assigned' || check.assigned) {
-            greedyBadge = `<span class="bg-emerald-600 text-white px-2 py-0.5 rounded-full text-[10px] font-bold shadow-xs">✅ Assigned</span>`;
-          } else if (check.reason && check.reason.toLowerCase().includes('capacity')) {
-            greedyBadge = `<span class="bg-rose-600 text-white px-2 py-0.5 rounded-full text-[10px] font-bold shadow-xs">❌ Full</span>`;
-          } else if (check.reason && check.reason.toLowerCase().includes('category')) {
-            greedyBadge = `<span class="bg-amber-600 text-white px-2 py-0.5 rounded-full text-[10px] font-bold shadow-xs">⚠️ Wrong Category</span>`;
-          } else if (check.reason && check.reason.toLowerCase().includes('blocked')) {
-            greedyBadge = `<span class="bg-rose-600 text-white px-2 py-0.5 rounded-full text-[10px] font-bold shadow-xs">⛔ Blocked</span>`;
+        const alloc = allocationsMap[activePickupId];
+
+        // Winning assigned destination centre for the active pickup
+        const isWinningAssignedDestination =
+          (alloc && alloc.assigned_centre_id === node.id) ||
+          (step.event_type === 'route_confirm' &&
+            (step.to_node === node.id ||
+             step.current_node === node.id ||
+             (activePathNodes.length > 1 && activePathNodes[activePathNodes.length - 1] === node.id)));
+
+        isAssignedCentre =
+          isWinningAssignedDestination ||
+          (check && (check.status === 'assigned' || check.assigned || check.status_badge === 'assigned'));
+
+        if (isGreedyOrConfirm) {
+          if (step.event_type === 'route_confirm' && isWinningAssignedDestination) {
+            // Winning assigned destination on route_confirm must ALWAYS display green Assigned, never red Capacity Full
+            greedyBadge = `<div class="mt-0.5 pointer-events-none select-none"><span class="bg-emerald-600 text-white px-1.5 py-0.5 rounded-full text-[9px] font-bold shadow-2xs leading-none pointer-events-none select-none">Assigned</span></div>`;
+          } else if (check) {
+            if (isAssignedCentre) {
+              greedyBadge = `<div class="mt-0.5 pointer-events-none select-none"><span class="bg-emerald-600 text-white px-1.5 py-0.5 rounded-full text-[9px] font-bold shadow-2xs leading-none pointer-events-none select-none">Assigned</span></div>`;
+            } else if (check.status_badge === 'capacity_full' || (check.reason && check.reason.toLowerCase().includes('capacity'))) {
+              greedyBadge = `<div class="mt-0.5 pointer-events-none select-none"><span class="bg-rose-600 text-white px-1.5 py-0.5 rounded-full text-[9px] font-bold shadow-2xs leading-none pointer-events-none select-none">Capacity Full</span></div>`;
+            } else if (check.status_badge === 'wrong_category' || (check.reason && check.reason.toLowerCase().includes('category'))) {
+              greedyBadge = `<div class="mt-0.5 pointer-events-none select-none"><span class="bg-amber-600 text-white px-1.5 py-0.5 rounded-full text-[9px] font-bold shadow-2xs leading-none pointer-events-none select-none">Wrong Type</span></div>`;
+            } else if (check.reason && check.reason.toLowerCase().includes('blocked')) {
+              greedyBadge = `<div class="mt-0.5 pointer-events-none select-none"><span class="bg-rose-600 text-white px-1.5 py-0.5 rounded-full text-[9px] font-bold shadow-2xs leading-none pointer-events-none select-none">Blocked</span></div>`;
+            }
           }
         }
       }
@@ -1117,8 +1388,8 @@ export default function MapCanvas({
       if (!marker) {
         const rootEl = document.createElement('div');
         rootEl.className = 'node-marker-wrapper';
-        rootEl.style.cursor = 'pointer';
-        rootEl.style.zIndex = '20'; // Elevated above edge midpoint pills (z-index: 5)
+        rootEl.style.zIndex = isPopped ? '20' : '10'; // Keep inside map container (<= 10, hovered/popped: 20)
+        rootEl.style.pointerEvents = 'none';
 
         marker = new maplibregl.Marker({
           element: rootEl,
@@ -1131,253 +1402,575 @@ export default function MapCanvas({
         currentMarkers[node.id] = marker;
       } else {
         marker.setLngLat([Number(node.lng), Number(node.lat)]);
-        marker.getElement().style.zIndex = isPopped ? '25' : '20';
+        marker.getElement().style.zIndex = isPopped ? '20' : '10';
       }
 
       const el = marker.getElement();
+      el.style.opacity = String(nodeOpacity);
+      el.style.pointerEvents = 'none';
 
-      // Node Hover Card Handler
-      el.onmouseenter = () => {
-        if (!mapInstance) return;
-        if (!hoverPopupRef.current) {
-          hoverPopupRef.current = new maplibregl.Popup({
-            closeButton: false,
-            closeOnClick: false,
-            offset: 18,
-            className: 'node-hover-popup',
-            maxWidth: '300px',
-          });
-        }
-        // If node is in northern half of map (lat > 28.58), open downwards so it never overflows top of screen
-        const isUpperHalf = Number(node.lat) > 28.58;
-        hoverPopupRef.current.options.anchor = isUpperHalf ? 'top' : 'bottom';
-        hoverPopupRef.current.options.offset = isUpperHalf ? 16 : 22;
-
-        const alloc = allocationsMapRef.current[node.id] || DEFAULT_NODE_DESTINATIONS[node.id];
-        const centreAlloc = centreAllocationsMapRef.current[node.id] || [];
-        const html = buildNodeHoverHtml({
-          node,
-          metric: metricRef.current,
-          alloc,
-          centreAllocations: centreAlloc,
-          centreCapacities: centreCapacitiesRef.current || {},
-        });
-        hoverPopupRef.current
-          .setLngLat([Number(node.lng), Number(node.lat)])
-          .setHTML(html)
-          .addTo(mapInstance);
-      };
-
-      el.onmouseleave = () => {
-        if (hoverPopupRef.current) {
-          hoverPopupRef.current.remove();
-        }
-      };
-
-      // Node Click Handler
-      el.onclick = (e) => {
-        e.stopPropagation();
-        const currentMode = modeRef.current;
-        if (currentMode === 'connect_road') {
-          if (!connectSourceNodeRef.current) {
-            setConnectSourceNode(node);
-            showToast(`Selected "${node.name}". Click second node to connect road.`, 'info');
-          } else if (connectSourceNodeRef.current.id === node.id) {
-            setConnectSourceNode(null);
-            showToast('Deselected source node.', 'info');
-          } else {
-            onConnectNodesRef.current(connectSourceNodeRef.current.id, node.id);
-            showToast(`Road connected between ${connectSourceNodeRef.current.name} and ${node.name}!`, 'success');
-            setConnectSourceNode(null);
-            setMode('inspect');
-          }
-        } else if (currentMode === 'inspect') {
-          if (nodeKind === 'pickup' && onSelectPickupRef.current) {
-            onSelectPickupRef.current(node.id);
-          }
-          showToast(`${node.name} (${nodeKind.toUpperCase()}) [${Number(node.lat).toFixed(4)}, ${Number(node.lng).toFixed(4)}]`, 'info');
-        }
-      };
-
-      // Apple Maps studio-grade distinct Node Visuals with centered Node IDs
+      // Compact Flat GIS SVG Markers:
       let pinHtml = '';
       if (nodeKind === 'pickup') {
         const catColor = CATEGORY_COLORS[node.waste_type] || '#EA580C';
-        pinHtml = `
-          <div style="
-            width: 32px;
-            height: 32px;
-            background-color: ${catColor};
-            border: 2.5px solid #FFFFFF;
-            border-radius: 9999px;
-            box-shadow: 0 4px 12px rgba(15,23,42,0.18);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #FFFFFF;
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 11px;
-            font-weight: 700;
-            letter-spacing: -0.5px;
-            transition: transform 0.15s ease-out;
-            transform: ${isPopped ? 'scale(1.2)' : 'scale(1)'};
-          ">
-            ${node.id}
-          </div>
-        `;
+        if (isActivePickup) {
+          // Active / Selected Pickup: 20px inside crisp 2px colored focus ring with 3px gap
+          pinHtml = `
+            <div class="node-pin-inner" style="
+              width: 20px;
+              height: 20px;
+              border-radius: 9999px;
+              background-color: ${catColor};
+              border: 2px solid #FFFFFF;
+              box-shadow: 0 0 0 3px #FFFFFF, 0 0 0 5px ${catColor}, 0 2px 6px rgba(15,23,42,0.22);
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              transition: transform 0.15s ease-out;
+              transform: ${isPopped ? 'scale(1.15)' : 'scale(1)'};
+            ">
+              <div style="width: 6px; height: 6px; border-radius: 9999px; background-color: #FFFFFF;"></div>
+            </div>
+          `;
+        } else {
+          // Inactive Pickup: 16px solid colored circle with crisp 5px white center dot and 2px white outer border
+          pinHtml = `
+            <div class="node-pin-inner" style="
+              width: 16px;
+              height: 16px;
+              border-radius: 9999px;
+              background-color: ${catColor};
+              border: 2px solid #FFFFFF;
+              box-shadow: 0 1px 3px rgba(15,23,42,0.18);
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              transition: transform 0.15s ease-out;
+              transform: ${isPopped ? 'scale(1.2)' : 'scale(1)'};
+            ">
+              <div style="width: 5px; height: 5px; border-radius: 9999px; background-color: #FFFFFF;"></div>
+            </div>
+          `;
+        }
       } else if (nodeKind === 'centre') {
-        pinHtml = `
-          <div style="
-            width: 34px;
-            height: 34px;
-            background-color: #059669;
-            border: 2.5px solid #FFFFFF;
-            border-radius: 9px;
-            box-shadow: 0 4px 12px rgba(15,23,42,0.18);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #FFFFFF;
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 11px;
-            font-weight: 700;
-            letter-spacing: -0.5px;
-            transition: transform 0.15s ease-out;
-            transform: ${isPopped ? 'scale(1.2)' : 'scale(1)'};
-          ">
-            ${node.id}
-          </div>
-        `;
+        // Recycling Centres (R1–R3+):
+        // 20px compact rounded square (rounded-[5px], white fill, 2px #059669 emerald border) containing 12px emerald Lucide Recycle SVG.
+        // Switches to solid #059669 with a white icon when assigned.
+        if (isAssignedCentre) {
+          pinHtml = `
+            <div class="node-pin-inner" style="
+              width: 20px;
+              height: 20px;
+              border-radius: 5px;
+              background-color: #059669;
+              border: 2px solid #047857;
+              box-shadow: 0 2px 6px rgba(5,150,105,0.32);
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              color: #FFFFFF;
+              transition: transform 0.15s ease-out;
+              transform: ${isPopped ? 'scale(1.2)' : 'scale(1)'};
+            ">
+              ${RECYCLE_SVG_12PX_WHITE}
+            </div>
+          `;
+        } else {
+          pinHtml = `
+            <div class="node-pin-inner" style="
+              width: 20px;
+              height: 20px;
+              border-radius: 5px;
+              background-color: #FFFFFF;
+              border: 2px solid #059669;
+              box-shadow: 0 1px 4px rgba(15,23,42,0.12);
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              color: #059669;
+              transition: transform 0.15s ease-out;
+              transform: ${isPopped ? 'scale(1.2)' : 'scale(1)'};
+            ">
+              ${RECYCLE_SVG_12PX}
+            </div>
+          `;
+        }
       } else {
-        // Junction: 24px white circle with 2.5px solid #475569 border and dark slate J1–J4 (10px font-bold) inside
-        pinHtml = `
-          <div style="
-            width: 24px;
-            height: 24px;
-            background-color: #FFFFFF;
-            border: 2.5px solid #475569;
-            border-radius: 9999px;
-            box-shadow: 0 2px 8px rgba(15,23,42,0.14);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #334155;
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 10px;
-            font-weight: 700;
-            letter-spacing: -0.5px;
-            transition: transform 0.15s ease-out;
-            transform: ${isPopped ? 'scale(1.25)' : 'scale(1)'};
-          ">
-            ${node.id}
-          </div>
-        `;
+        // Road Junctions (J1–J4):
+        // Clean 10px bullseye dots:
+        // unvisited: muted gray #94A3B8 core + white ring;
+        // visited/settled by Dijkstra: crisp dark #0F172A core + 2px white ring + dark outer border
+        if (isVisited || isInActivePath || isPopped) {
+          pinHtml = `
+            <div class="node-pin-inner" style="
+              width: 11px;
+              height: 11px;
+              border-radius: 9999px;
+              background-color: #FFFFFF;
+              border: 1.5px solid #0F172A;
+              box-shadow: 0 1px 3px rgba(15,23,42,0.22);
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              transition: transform 0.15s ease-out;
+              transform: ${isPopped ? 'scale(1.25)' : 'scale(1)'};
+            ">
+              <div style="width: 5px; height: 5px; border-radius: 9999px; background-color: #0F172A;"></div>
+            </div>
+          `;
+        } else {
+          pinHtml = `
+            <div class="node-pin-inner" style="
+              width: 10px;
+              height: 10px;
+              border-radius: 9999px;
+              background-color: #FFFFFF;
+              border: 1.5px solid #CBD5E1;
+              box-shadow: 0 1px 2px rgba(15,23,42,0.12);
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              transition: transform 0.15s ease-out;
+            ">
+              <div style="width: 4px; height: 4px; border-radius: 9999px; background-color: #94A3B8;"></div>
+            </div>
+          `;
+        }
       }
 
-      // Single-line clean landmark name without dense metadata line
-      const cleanLandmark = getCleanLandmarkName(node);
+      // Clean Single-Line Haloed Labels directly below each node
+      const labelText = getNodeDisplayLabel(node);
 
       el.innerHTML = `
-        <div class="relative flex flex-col items-center select-none group">
-          ${
-            isPopped || isConnectSource
-              ? `<div class="absolute -inset-2.5 rounded-full bg-amber-400/35 animate-pulse pointer-events-none"></div>`
-              : ''
-          }
-          ${
-            distBadge
-              ? `<div class="mb-1 px-2 py-0.5 rounded-full text-[10.5px] font-bold bg-white text-slate-800 border border-slate-300 shadow-xs whitespace-nowrap dijkstra-badge" style="font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums;">${distBadge}</div>`
-              : ''
-          }
-          ${pinHtml}
-          <div class="mt-1 px-2 py-0.5 rounded-md bg-white border border-slate-200/90 shadow-sm whitespace-nowrap flex items-center gap-1.5 leading-tight">
-            <span class="font-semibold text-[12px] text-[#0F172A]">${cleanLandmark}</span>
-            ${centreSubLabel ? `<span class="text-[10px] font-mono font-medium text-emerald-700 bg-emerald-50 px-1 py-0.5 rounded border border-emerald-200/60" style="font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums;">${centreSubLabel}</span>` : ''}
+        <div class="relative flex flex-col items-center select-none pointer-events-none">
+          ${isConnectSource ? `<div class="absolute -inset-2 rounded-full bg-amber-400/35 animate-pulse pointer-events-none"></div>` : ''}
+          ${distBadge}
+          <div class="node-hit-target" style="width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; pointer-events: auto; cursor: pointer;">
+            ${pinHtml}
           </div>
-          ${greedyBadge ? `<div class="mt-0.5 whitespace-nowrap">${greedyBadge}</div>` : ''}
+          <div class="map-halo-label mt-0.5 pointer-events-none select-none">${labelText}</div>
+          ${greedyBadge}
         </div>
       `;
+
+      const hitTarget = el.querySelector('.node-hit-target');
+      if (hitTarget) {
+        // Node Hover Card Handler attached ONLY to the stable fixed-size hit target
+        hitTarget.onmouseenter = () => {
+          el.style.zIndex = '20';
+          if (!mapInstance) return;
+          if (!hoverPopupRef.current) {
+            hoverPopupRef.current = new maplibregl.Popup({
+              closeButton: false,
+              closeOnClick: false,
+              offset: 18,
+              className: 'node-hover-popup',
+              maxWidth: '300px',
+            });
+          }
+          const isUpperHalf = Number(node.lat) > 28.58;
+          hoverPopupRef.current.options.anchor = isUpperHalf ? 'top' : 'bottom';
+          hoverPopupRef.current.options.offset = isUpperHalf ? 16 : 22;
+
+          const alloc = allocationsMapRef.current[node.id] || DEFAULT_NODE_DESTINATIONS[node.id];
+          const centreAlloc = centreAllocationsMapRef.current[node.id] || [];
+          const html = buildNodeHoverHtml({
+            node,
+            metric: metricRef.current,
+            alloc,
+            centreAllocations: centreAlloc,
+            centreCapacities: centreCapacitiesRef.current || {},
+          });
+          hoverPopupRef.current
+            .setLngLat([Number(node.lng), Number(node.lat)])
+            .setHTML(html)
+            .addTo(mapInstance);
+        };
+
+        hitTarget.onmouseleave = () => {
+          el.style.zIndex = isPopped ? '20' : '10';
+          if (hoverPopupRef.current) {
+            hoverPopupRef.current.remove();
+          }
+        };
+
+        // Node Click Handler
+        hitTarget.onclick = (e) => {
+          e.stopPropagation();
+          const currentMode = modeRef.current;
+          if (currentMode === 'connect_road') {
+            if (!connectSourceNodeRef.current) {
+              setConnectSourceNode(node);
+              showToast(`Selected "${getNodeDisplayLabel(node)}". Click second node to connect road.`, 'info');
+            } else if (connectSourceNodeRef.current.id === node.id) {
+              setConnectSourceNode(null);
+              showToast('Deselected source node.', 'info');
+            } else {
+              onConnectNodesRef.current(connectSourceNodeRef.current.id, node.id);
+              showToast(`Road connected between ${getNodeDisplayLabel(connectSourceNodeRef.current)} and ${getNodeDisplayLabel(node)}!`, 'success');
+              setConnectSourceNode(null);
+              setMode('inspect');
+            }
+          } else if (currentMode === 'inspect') {
+            if (nodeKind === 'pickup' && onSelectPickupRef.current) {
+              onSelectPickupRef.current(node.id);
+            }
+            showToast(`${getNodeDisplayLabel(node)} (${nodeKind.toUpperCase()})`, 'info');
+          }
+        };
+      }
     });
   }, [
     mapInstance,
     isMapLoaded,
     nodes,
     allocationsMap,
+    activePickupId,
     currentPoppedNode,
+    activePathNodesSet,
+    visitedNodes,
     dijkstraDistances,
     metric,
-    centreCapacities,
     candidateChecklist,
     connectSourceNode,
     showToast,
   ]);
 
-  // 8. Vehicle Icon along Active Route Segments
-  const animateVehicle = useCallback(() => {
-    if (!mapInstance || !isMapLoaded) return;
-    if (activePathNodes.length < 2) return;
+  // 8. True "Snake Game" Trailing Black Line + Front Arrowhead Engine (60 FPS requestAnimationFrame)
+  const easeInOutCubic = useCallback((t) => {
+    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+  }, []);
 
-    const pathCoords = activePathNodes
-      .map((id) => nodesMap[id])
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+
+    ensureGraphLayers(map);
+    const traversingSource = map.getSource('edges-traversing-source');
+
+    // Cancel any prior edge animation
+    if (snakeAnimFrameRef.current) {
+      cancelAnimationFrame(snakeAnimFrameRef.current);
+      snakeAnimFrameRef.current = null;
+    }
+
+    // Ensure snakeArrowMarker DOM marker exists
+    if (!snakeArrowMarkerRef.current) {
+      const arrowEl = document.createElement('div');
+      arrowEl.className = 'snake-arrow-marker';
+      arrowEl.style.width = '14px';
+      arrowEl.style.height = '14px';
+      arrowEl.style.pointerEvents = 'none';
+      arrowEl.style.transition = 'none !important';
+      arrowEl.style.display = 'none';
+      arrowEl.style.zIndex = '12';
+      arrowEl.innerHTML = `
+        <div id="snake-arrow-inner" style="width: 14px; height: 14px; transform-origin: center; transition: none !important; display: flex; align-items: center; justify-content: center;">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" style="display: block; overflow: visible;">
+            <path d="M 1.5 2 L 12.5 7 L 1.5 12 L 4.5 7 Z" fill="#0F172A" stroke="#FFFFFF" stroke-width="1.2" stroke-linejoin="round" />
+          </svg>
+        </div>
+      `;
+      snakeArrowMarkerRef.current = new maplibregl.Marker({
+        element: arrowEl,
+        anchor: 'center',
+        subpixelPositioning: false,
+      })
+        .setLngLat([0, 0])
+        .addTo(map);
+    }
+
+    const arrowEl = snakeArrowMarkerRef.current.getElement();
+    const arrowInner = arrowEl?.querySelector('#snake-arrow-inner');
+
+    const clearTraversing = () => {
+      if (traversingSource) {
+        traversingSource.setData({ type: 'FeatureCollection', features: [] });
+      }
+      if (arrowEl) {
+        arrowEl.style.display = 'none';
+      }
+      animatingEdgeIdRef.current = null;
+    };
+
+    if (step.event_type !== 'dijkstra_relax' || !step.from_node || !step.to_node) {
+      clearTraversing();
+      return;
+    }
+
+    const u = nodesMap[step.from_node];
+    const v = nodesMap[step.to_node];
+    if (!u || !v || u.lng == null || u.lat == null || v.lng == null || v.lat == null) {
+      clearTraversing();
+      return;
+    }
+
+    const uLng = Number(u.lng);
+    const uLat = Number(u.lat);
+    const vLng = Number(v.lng);
+    const vLat = Number(v.lat);
+    const p1 = [uLng, uLat];
+    const p2 = [vLng, vLat];
+
+    const toNodeId = step.to_node;
+    const activeEdgeId = step.active_edge_id || `${step.from_node}->${step.to_node}`;
+    animatingEdgeIdRef.current = activeEdgeId;
+
+    // Prevent Instant Snapping: EXCLUDE (u -> v) from static sources while animating
+    updateAllEdgeSources(map, edgesRef.current, nodesRef.current, activeEdgeId);
+
+    // Exact bearing angle calculation for +X pointing SVG arrowhead:
+    const midLatRad = ((uLat + vLat) / 2) * (Math.PI / 180);
+    const dLngScaled = (vLng - uLng) * Math.cos(midLatRad);
+    const dLat = vLat - uLat;
+    const angleDeg = -Math.atan2(dLat, dLngScaled) * (180 / Math.PI);
+
+    if (arrowInner) {
+      arrowInner.style.transform = `rotate(${angleDeg}deg)`;
+    }
+    if (arrowEl) {
+      arrowEl.style.display = 'block';
+    }
+    snakeArrowMarkerRef.current.setLngLat(p1);
+
+    const speed = playbackSpeedRef.current || 1;
+    const duration = Math.max(120, Math.floor(420 / speed));
+    const startTime = performance.now();
+
+    const animateTraverse = (currentTime) => {
+      const elapsed = currentTime - startTime;
+      const progress = Math.min(1, elapsed / duration);
+      const e = easeInOutCubic(progress);
+
+      const curLng = uLng + (vLng - uLng) * e;
+      const curLat = uLat + (vLat - uLat) * e;
+      const curCoord = [curLng, curLat];
+
+      if (traversingSource) {
+        traversingSource.setData({
+          type: 'FeatureCollection',
+          features: [
+            {
+              type: 'Feature',
+              geometry: {
+                type: 'LineString',
+                coordinates: [p1, curCoord],
+              },
+            },
+          ],
+        });
+      }
+
+      if (snakeArrowMarkerRef.current) {
+        snakeArrowMarkerRef.current.setLngLat(curCoord);
+      }
+
+      if (progress < 1) {
+        snakeAnimFrameRef.current = requestAnimationFrame(animateTraverse);
+      } else {
+        // Animation finished
+        snakeAnimFrameRef.current = null;
+        playNodeTick();
+        if (arrowEl) {
+          arrowEl.style.display = 'none';
+        }
+        if (traversingSource) {
+          traversingSource.setData({ type: 'FeatureCollection', features: [] });
+        }
+        animatingEdgeIdRef.current = null;
+
+        // Commit (u -> v) to static source (edges-spt-source or edges-rejected-source)
+        updateAllEdgeSources(map, edgesRef.current, nodesRef.current, null);
+
+        // Subtle pop on target node v
+        const targetMarker = nodeMarkersRef.current[toNodeId];
+        if (targetMarker) {
+          const markerEl = targetMarker.getElement();
+          const pinInner = markerEl?.querySelector('.node-pin-inner');
+          if (pinInner) {
+            pinInner.classList.remove('node-pop-active');
+            void pinInner.offsetWidth;
+            pinInner.classList.add('node-pop-active');
+            setTimeout(() => {
+              pinInner?.classList?.remove('node-pop-active');
+            }, 250);
+          }
+        }
+      }
+    };
+
+    snakeAnimFrameRef.current = requestAnimationFrame(animateTraverse);
+
+    return () => {
+      if (snakeAnimFrameRef.current) {
+        cancelAnimationFrame(snakeAnimFrameRef.current);
+        snakeAnimFrameRef.current = null;
+      }
+    };
+  }, [step, nodesMap, ensureGraphLayers, updateAllEdgeSources, easeInOutCubic]);
+
+  // 9. Automatic Vehicle Drive Engine (Mr. Bean Lime-Green Mini Cooper)
+  const activePickupIdRef = useRef(activePickupId);
+  activePickupIdRef.current = activePickupId;
+
+  const animateVehicle = useCallback(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+
+    ensureGraphLayers(map);
+    const currentPathNodes = activePathNodesRef.current || [];
+    if (currentPathNodes.length < 2) return;
+
+    const nMap = nodesMapRef.current || {};
+    const pathCoords = currentPathNodes
+      .map((id) => nMap[id])
       .filter((n) => n && n.lat != null && n.lng != null)
       .map((n) => [Number(n.lng), Number(n.lat)]);
 
     if (pathCoords.length < 2) return;
 
+    const routeDrawnSource = map.getSource('edges-route-drawn-source');
+    const thisPickupId = activePickupIdRef.current;
+
+    if (arrivalTimeoutRef.current) {
+      clearTimeout(arrivalTimeoutRef.current);
+      arrivalTimeoutRef.current = null;
+    }
+
+    if (carAnimFrameRef.current) {
+      cancelAnimationFrame(carAnimFrameRef.current);
+      carAnimFrameRef.current = null;
+    }
+
+    // Stop any existing hum cleanly before starting new drive
+    stopCarHum();
+
     let carMarker = carMarkerRef.current;
     if (!carMarker) {
       const carEl = document.createElement('div');
       carEl.className = 'vehicle-marker-wrapper';
-      carEl.style.zIndex = '22';
-
-      carEl.innerHTML = `
-        <div id="eco-vehicle-badge" style="
-          width: 34px;
-          height: 34px;
-          background-color: #10B981;
-          border: 2px solid #FFFFFF;
-          border-radius: 9999px;
-          box-shadow: 0 4px 10px rgba(0,0,0,0.3);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          color: #FFFFFF;
-          transition: transform 0.1s ease-out;
-        ">
-          <svg style="width: 18px; height: 18px;" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0z"></path>
-            <path stroke-linecap="round" stroke-linejoin="round" d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1m8-1a1 1 0 01-1 1H9m4-1V8a1 1 0 011-1h2.586a1 1 0 01.707.293l3.414 3.414a1 1 0 01.293.707V16a1 1 0 01-1 1h-1m-6-1a1 1 0 001 1h1M5 17a2 2 0 104 0m-4 0a2 2 0 114 0m6 0a2 2 0 104 0m-4 0a2 2 0 114 0"></path>
-          </svg>
-        </div>
-      `;
-
-      // Position between first two nodes
-      const midPoint = [
-        (pathCoords[0][0] + pathCoords[1][0]) / 2,
-        (pathCoords[0][1] + pathCoords[1][1]) / 2,
-      ];
+      carEl.style.zIndex = '15';
+      carEl.style.position = 'absolute';
+      carEl.style.pointerEvents = 'none';
+      carEl.style.willChange = 'transform';
+      carEl.style.transition = 'none !important';
+      carEl.innerHTML = MR_BEAN_MINI_COOPER_HTML;
 
       carMarker = new maplibregl.Marker({
         element: carEl,
         anchor: 'center',
         subpixelPositioning: false,
       })
-        .setLngLat(midPoint)
-        .addTo(mapInstance);
+        .setLngLat(pathCoords[0])
+        .addTo(map);
 
       carMarkerRef.current = carMarker;
+    } else {
+      carMarker.getElement().style.display = 'block';
+      carMarker.setLngLat(pathCoords[0]);
     }
 
-    if (carAnimFrameRef.current) {
-      cancelAnimationFrame(carAnimFrameRef.current);
+    setIsCarDriving(true);
+
+    // 1. Turn .car-headlights ON, turn .car-brakelights OFF, and fire playCarIgnition()
+    setCarLights(true, false);
+    playCarIgnition();
+
+    const speed = playbackSpeedRef.current || 1;
+    // 2. Start startCarHum(playbackSpeed) as the car accelerates smoothly along path_nodes
+    startCarHum(speed);
+
+    // Pre-calculate segment lengths and total path distance for 85% braking detection
+    const segmentDistances = [];
+    let totalPathDist = 0;
+    for (let i = 0; i < pathCoords.length - 1; i++) {
+      const dX = pathCoords[i + 1][0] - pathCoords[i][0];
+      const dY = pathCoords[i + 1][1] - pathCoords[i][1];
+      const dist = Math.hypot(dX, dY);
+      segmentDistances.push(dist);
+      totalPathDist += dist;
+    }
+
+    let cumulatedDistance = 0;
+    let brakeTriggered = false;
+
+    // Initialize edges-route-drawn-source at the starting point
+    if (routeDrawnSource) {
+      routeDrawnSource.setData({
+        type: 'FeatureCollection',
+        features: [
+          {
+            type: 'Feature',
+            geometry: {
+              type: 'LineString',
+              coordinates: [pathCoords[0], pathCoords[0]],
+            },
+          },
+        ],
+      });
     }
 
     let segmentIdx = 0;
     let progress = 0;
-    const speed = 0.012 * (playbackSpeed || 1);
+    const currentSpeed = 0.022 * speed;
+
+    const updateHeading = (p1, p2) => {
+      const currentMap = mapRef.current;
+      if (!currentMap) return;
+      const pt1 = currentMap.project(p1);
+      const pt2 = currentMap.project(p2);
+      const dX = pt2.x - pt1.x;
+      const dY = pt2.y - pt1.y;
+      const angleDeg = Math.atan2(dY, dX) * (180 / Math.PI);
+      const inner = carMarkerRef.current?.getElement()?.querySelector('#eco-mr-bean-mini');
+      if (inner) {
+        inner.style.transform = `rotate(${angleDeg}deg)`;
+      }
+    };
+
+    updateHeading(pathCoords[0], pathCoords[1]);
 
     const stepDrive = () => {
       if (segmentIdx >= pathCoords.length - 1) {
+        // Physical arrival at destination recycling centre
+        if (carMarkerRef.current) {
+          carMarkerRef.current.setLngLat(pathCoords[pathCoords.length - 1]);
+        }
+        if (routeDrawnSource) {
+          routeDrawnSource.setData({
+            type: 'FeatureCollection',
+            features: [
+              {
+                type: 'Feature',
+                geometry: {
+                  type: 'LineString',
+                  coordinates: pathCoords,
+                },
+              },
+            ],
+          });
+        }
+
+        // Cleanly stop engine hum
+        stopCarHum();
+
+        if (!brakeTriggered) {
+          brakeTriggered = true;
+          setCarLights(true, true);
+          playCarBrakeAndArrive();
+        }
+
+        carAnimFrameRef.current = null;
+
+        // 4. On arrival, keep .car-brakelights lit for ~550ms before fading lights off,
+        // then trigger onVehicleFinish(pickupId).
+        arrivalTimeoutRef.current = setTimeout(() => {
+          arrivalTimeoutRef.current = null;
+          setCarLights(false, false);
+          setIsCarDriving(false);
+          onVehicleFinishRef.current?.(thisPickupId);
+        }, 550);
+
         return;
       }
 
@@ -1386,40 +1979,99 @@ export default function MapCanvas({
 
       const currentLng = p1[0] + (p2[0] - p1[0]) * progress;
       const currentLat = p1[1] + (p2[1] - p1[1]) * progress;
+      const currentCoord = [currentLng, currentLat];
 
-      carMarker.setLngLat([currentLng, currentLat]);
+      if (carMarkerRef.current) {
+        carMarkerRef.current.setLngLat(currentCoord);
+      }
 
-      progress += speed;
+      // Smoothly paint winning route directly behind the car in real time
+      if (routeDrawnSource) {
+        const drawn = [...pathCoords.slice(0, segmentIdx + 1), currentCoord];
+        routeDrawnSource.setData({
+          type: 'FeatureCollection',
+          features: [
+            {
+              type: 'Feature',
+              geometry: {
+                type: 'LineString',
+                coordinates: drawn,
+              },
+            },
+          ],
+        });
+      }
+
+      // 3. At 85% of total path distance (once per drive), turn .car-brakelights ON,
+      // call stopCarHum(), and fire playCarBrakeAndArrive().
+      const currentSegDist = segmentDistances[segmentIdx] || 0;
+      const distTraveled = cumulatedDistance + currentSegDist * progress;
+      const overallProgress = totalPathDist > 0 ? distTraveled / totalPathDist : progress;
+
+      if (overallProgress >= 0.85 && !brakeTriggered) {
+        brakeTriggered = true;
+        setCarLights(true, true);
+        stopCarHum();
+        playCarBrakeAndArrive();
+      }
+
+      progress += currentSpeed;
       if (progress >= 1) {
+        cumulatedDistance += segmentDistances[segmentIdx] || 0;
         progress = 0;
         segmentIdx += 1;
+        if (segmentIdx < pathCoords.length - 1) {
+          updateHeading(pathCoords[segmentIdx], pathCoords[segmentIdx + 1]);
+        }
       }
 
       carAnimFrameRef.current = requestAnimationFrame(stepDrive);
     };
 
     carAnimFrameRef.current = requestAnimationFrame(stepDrive);
-  }, [mapInstance, isMapLoaded, activePathNodes, nodesMap, playbackSpeed]);
+  }, [ensureGraphLayers, setCarLights]);
 
-  // Trigger vehicle drive on route confirmation
+  // Automatic Car Drive Trigger on route_confirm & Instant Cleanup on tab switch / reset / prev step
+  const isConfirm = step.event_type === 'route_confirm';
+  const currentStepNum = step.step_index;
+
   useEffect(() => {
-    if (step.event_type === 'route_confirm' && activePathNodes.length >= 2) {
-      animateVehicle();
-    }
-    return () => {
+    const isSinglePickupConfirm = activePickupId && isConfirm && activePathNodes.length >= 2;
+    const currentStepKey = `${activePickupId}-${currentStepNum || 'confirm'}-${(activePathNodes || []).join(',')}`;
+
+    if (isSinglePickupConfirm) {
+      if (lastDrivenStepKeyRef.current !== currentStepKey) {
+        lastDrivenStepKeyRef.current = currentStepKey;
+        animateVehicle();
+      }
+    } else {
+      // Clear/hide the car marker immediately whenever switching pickup tabs, resetting, or stepping backward before route_confirm
+      lastDrivenStepKeyRef.current = null;
       if (carAnimFrameRef.current) {
         cancelAnimationFrame(carAnimFrameRef.current);
+        carAnimFrameRef.current = null;
       }
-    };
-  }, [step.event_type, activePathNodes, animateVehicle]);
+      if (arrivalTimeoutRef.current) {
+        clearTimeout(arrivalTimeoutRef.current);
+        arrivalTimeoutRef.current = null;
+      }
+      stopAllSounds();
+      setCarLights(false, false);
+      if (carMarkerRef.current) {
+        carMarkerRef.current.remove();
+        carMarkerRef.current = null;
+      }
+      setIsCarDriving(false);
 
-  // Clean up vehicle marker when route is cleared
-  useEffect(() => {
-    if (activePathNodes.length === 0 && carMarkerRef.current) {
-      carMarkerRef.current.remove();
-      carMarkerRef.current = null;
+      const map = mapRef.current;
+      if (map && map.isStyleLoaded()) {
+        const routeDrawnSource = map.getSource('edges-route-drawn-source');
+        if (routeDrawnSource && activePickupId !== 'ALL' && activePickupId !== null) {
+          routeDrawnSource.setData({ type: 'FeatureCollection', features: [] });
+        }
+      }
     }
-  }, [activePathNodes]);
+  }, [activePickupId, isConfirm, currentStepNum, activePathNodes, animateVehicle]);
 
   // 9. Instant Local Search + External Photon Geocoder (0 forbidden URLs)
   const handleSearchQueryChange = (e) => {
@@ -1433,12 +2085,10 @@ export default function MapCanvas({
     }
 
     const lower = query.toLowerCase();
-    // 1. Instant local match
     const localMatches = NCR_LOCAL_PLACES.filter((p) => p.name.toLowerCase().includes(lower));
     setSearchResults(localMatches);
     setSearchDropdownOpen(true);
 
-    // 2. Photon geocoder fallback for query completion (open geocoder)
     if (searchAbortControllerRef.current) {
       searchAbortControllerRef.current.abort();
     }
@@ -1457,7 +2107,6 @@ export default function MapCanvas({
           lat: f.geometry.coordinates[1],
         }));
 
-        // Merge local matches with fetched
         const combined = [...localMatches];
         fetched.forEach((f) => {
           if (!combined.some((c) => Math.abs(c.lat - f.lat) < 0.005 && Math.abs(c.lng - f.lng) < 0.005)) {
@@ -1531,7 +2180,6 @@ export default function MapCanvas({
     });
   };
 
-  // Sync fullscreen change with native browser events and resize MapLibre
   useEffect(() => {
     const handleFullscreenChange = () => {
       const isFull = !!document.fullscreenElement;
@@ -1550,7 +2198,6 @@ export default function MapCanvas({
     };
   }, [fitAllNodes]);
 
-  // Handle CSS fallback fullscreen resize
   useEffect(() => {
     if (mapRef.current) {
       const timer = setTimeout(() => {
@@ -1561,7 +2208,6 @@ export default function MapCanvas({
     }
   }, [isFullscreen, fitAllNodes]);
 
-  // Escape key listener to exit fallback fullscreen
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (e.key === 'Escape' && isFullscreen) {
@@ -1614,7 +2260,7 @@ export default function MapCanvas({
       {/* Toast Notification */}
       {toastMessage && (
         <div
-          className={`absolute top-16 left-1/2 -translate-x-1/2 z-30 px-3.5 py-2 rounded-xl text-xs font-semibold shadow-lg flex items-center gap-2 backdrop-blur-md animate-in fade-in transition-all ${
+          className={`absolute bottom-5 left-1/2 -translate-x-1/2 z-50 px-3.5 py-2 rounded-xl text-xs font-semibold shadow-lg flex items-center gap-2 backdrop-blur-md animate-in fade-in transition-all ${
             toastType === 'success'
               ? 'bg-emerald-900/90 text-white border border-emerald-500'
               : toastType === 'error'
@@ -1630,7 +2276,7 @@ export default function MapCanvas({
       )}
 
       {/* Floating Toolbar at Top of Map */}
-      <div className="absolute top-3 left-3 right-3 z-20 flex flex-wrap items-center justify-between gap-2 p-1.5 rounded-xl bg-white/95 backdrop-blur-md border border-slate-200/90 shadow-sm text-xs select-none">
+      <div className="absolute top-3 left-3 right-3 z-40 flex flex-wrap items-center justify-between gap-2 p-1.5 rounded-xl bg-white/95 backdrop-blur-md border border-slate-200/90 shadow-sm text-xs select-none">
         {/* Left: Search Box */}
         <div className="relative flex-1 min-w-[200px] max-w-xs">
           <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-slate-50 border border-slate-200 focus-within:border-emerald-500 focus-within:bg-white transition-all">
@@ -1673,7 +2319,7 @@ export default function MapCanvas({
                   onClick={() => handleSelectSearchResult(item)}
                   className="w-full text-left px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-2 transition-colors"
                 >
-                  <MapPin className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span className="text-emerald-600">📍</span>
                   <span className="truncate">{item.name}</span>
                 </button>
               ))}
@@ -1692,7 +2338,8 @@ export default function MapCanvas({
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            <span>⏱️ Travel Time (min)</span>
+            <Clock className={`w-3.5 h-3.5 ${metric === 'time' ? 'text-emerald-600' : 'text-slate-500'}`} />
+            <span>Travel Time (min)</span>
           </button>
           <button
             type="button"
@@ -1703,18 +2350,16 @@ export default function MapCanvas({
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            <span>🛣️ Distance (km)</span>
+            <Route className={`w-3.5 h-3.5 ${metric === 'distance' ? 'text-indigo-600' : 'text-slate-500'}`} />
+            <span>Distance (km)</span>
           </button>
         </div>
 
-        {/* Right: Mode Buttons (Inspect, Pickup, Centre, Connect Road, Fullscreen) */}
+        {/* Right: Working Toolbar Buttons (Inspect, Pickup, Centre, Connect Road, Fullscreen) */}
         <div className="flex items-center gap-1">
           <button
             type="button"
-            onClick={() => {
-              setMode('inspect');
-              setConnectSourceNode(null);
-            }}
+            onClick={() => handleSelectMode('inspect')}
             className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg font-semibold transition-all ${
               mode === 'inspect'
                 ? 'bg-emerald-600 text-white shadow-xs'
@@ -1727,11 +2372,7 @@ export default function MapCanvas({
 
           <button
             type="button"
-            onClick={() => {
-              setMode('add_pickup');
-              setConnectSourceNode(null);
-              showToast('Click anywhere on the map to place a pickup!', 'info');
-            }}
+            onClick={() => handleSelectMode('add_pickup')}
             className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg font-semibold transition-all ${
               mode === 'add_pickup'
                 ? 'bg-amber-600 text-white shadow-xs'
@@ -1744,11 +2385,7 @@ export default function MapCanvas({
 
           <button
             type="button"
-            onClick={() => {
-              setMode('add_centre');
-              setConnectSourceNode(null);
-              showToast('Click anywhere on the map to place a recycling centre!', 'info');
-            }}
+            onClick={() => handleSelectMode('add_centre')}
             className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg font-semibold transition-all ${
               mode === 'add_centre'
                 ? 'bg-emerald-700 text-white shadow-xs'
@@ -1761,11 +2398,7 @@ export default function MapCanvas({
 
           <button
             type="button"
-            onClick={() => {
-              setMode('connect_road');
-              setConnectSourceNode(null);
-              showToast('Click 1st node to begin straight road connection.', 'info');
-            }}
+            onClick={() => handleSelectMode('connect_road')}
             className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg font-semibold transition-all ${
               mode === 'connect_road'
                 ? 'bg-indigo-600 text-white shadow-xs'
@@ -1794,7 +2427,7 @@ export default function MapCanvas({
 
       {/* Sub-bar hint when in creation modes */}
       {mode !== 'inspect' && (
-        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/95 backdrop-blur-md border border-slate-300 shadow-md text-xs">
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/95 backdrop-blur-md border border-slate-300 shadow-md text-xs">
           {mode === 'add_pickup' && (
             <>
               <span className="font-bold text-amber-700">Drop Pickup:</span>
@@ -1835,24 +2468,44 @@ export default function MapCanvas({
                 className="w-14 bg-slate-50 border border-slate-200 rounded px-1 py-0.5 text-xs text-center font-semibold text-slate-700"
               />
               <span className="text-slate-500">kg</span>
-              <span className="text-slate-400 text-[11px]">(Click map to place)</span>
+              <div className="w-[1px] h-3.5 bg-slate-200 mx-1" />
+              <span className="text-slate-600 font-medium">Streams:</span>
+              <div className="flex items-center gap-1">
+                {ALL_STREAMS.map((stream) => {
+                  const isSelected = selectedStreams.includes(stream);
+                  return (
+                    <button
+                      key={stream}
+                      type="button"
+                      onClick={() => handleToggleStream(stream)}
+                      title={isSelected ? `Remove ${stream}` : `Accept ${stream}`}
+                      className={`px-2 py-0.5 rounded-full text-[11px] font-semibold flex items-center gap-1 transition-all ${
+                        isSelected
+                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-2xs'
+                          : 'bg-slate-100 text-slate-500 border border-slate-200 hover:bg-slate-200/70'
+                      }`}
+                    >
+                      {isSelected && <Check className="w-3 h-3 text-emerald-600" />}
+                      <span>{stream}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <span className="text-slate-400 text-[11px] ml-1">(Click map to place)</span>
             </>
           )}
 
           {mode === 'connect_road' && (
             <span className="font-bold text-indigo-700">
               {connectSourceNode
-                ? `From "${connectSourceNode.name}" → Click 2nd node`
+                ? `From "${getNodeDisplayLabel(connectSourceNode)}" → Click 2nd node`
                 : 'Click 1st node to connect straight road'}
             </span>
           )}
 
           <button
             type="button"
-            onClick={() => {
-              setMode('inspect');
-              setConnectSourceNode(null);
-            }}
+            onClick={() => handleSelectMode('inspect')}
             className="ml-2 text-slate-400 hover:text-slate-600"
           >
             <X className="w-3.5 h-3.5" />
@@ -1861,10 +2514,12 @@ export default function MapCanvas({
       )}
 
       {/* Main MapLibre Map Canvas Container */}
-      <div ref={mapContainerRef} className="w-full flex-1 h-full min-h-[500px]" />
+      <div className="relative w-full h-full z-0 isolate flex-1">
+        <div ref={mapContainerRef} className="w-full h-full min-h-[500px]" />
+      </div>
 
       {/* Bottom Right Floating Controls */}
-      <div className="absolute bottom-8 right-4 z-20 flex flex-col items-center gap-1.5 p-1 rounded-xl bg-white/90 backdrop-blur-md border border-slate-200/80 shadow-md">
+      <div className="absolute bottom-8 right-4 z-30 flex flex-col items-center gap-1.5 p-1 rounded-xl bg-white/90 backdrop-blur-md border border-slate-200/80 shadow-md">
         <button
           type="button"
           onClick={() => {
@@ -1906,22 +2561,25 @@ export default function MapCanvas({
         </button>
       </div>
 
-      {/* Replay Vehicle Drive Button (when route is confirmed) */}
-      {activePathNodes.length >= 2 && (
-        <div className="absolute bottom-8 left-4 z-20 flex items-center gap-2">
+      {/* Subtle Replay Drive Button (visible ONLY when idle on a completed route) */}
+      {activePickupId && isConfirm && activePathNodes.length >= 2 && !isPlaying && !isRunAll && !isCarDriving && (
+        <div className="absolute bottom-8 left-4 z-30 flex items-center gap-2">
           <button
             type="button"
-            onClick={animateVehicle}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-900/90 text-white text-xs font-semibold shadow-md hover:bg-slate-800 backdrop-blur-md transition-all"
+            onClick={() => {
+              unlockAudio();
+              animateVehicle();
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/80 text-white text-xs font-medium shadow-sm hover:bg-slate-800 backdrop-blur-md transition-all border border-slate-700/50"
           >
-            <Play className="w-3.5 h-3.5 text-lime-400 fill-lime-400" />
-            <span>Drive Route</span>
+            <Play className="w-3 h-3 text-lime-400 fill-lime-400" />
+            <span>Replay Drive</span>
           </button>
         </div>
       )}
 
       {/* Clean Attribution Pill */}
-      <div className="absolute bottom-2 right-4 z-10 px-2 py-0.5 rounded-full bg-white/70 backdrop-blur-xs text-[9.5px] text-slate-500 font-medium">
+      <div className="absolute bottom-2 right-4 z-20 px-2 py-0.5 rounded-full bg-white/70 backdrop-blur-xs text-[9.5px] text-slate-500 font-medium pointer-events-none">
         MapLibre • OpenFreeMap
       </div>
     </div>

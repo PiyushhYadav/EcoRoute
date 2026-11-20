@@ -2,15 +2,46 @@
  * EcoRoute Apple Maps Crisp Minimal Style for MapLibre GL JS
  *
  * Upgraded OpenFreeMap Liberty Vector Style matching studio-grade Apple Maps cartography:
- * - Background/Land: Crisp cool alabaster #F5F7FA
- * - Parks/Forest: Fresh soft sage-mint #D8EEDB (fill-opacity: 0.82)
- * - Water: Luminous crisp sky-blue #A7D7FA with #8BC8F5 waterway lines
- * - Roads: Crisp #FFFFFF motorway/trunk/primary fills with subtle cool-gray casings (#DCE3EC)
- * - Decluttered: Town/village/suburb/neighbourhood/poi/shield/street labels stripped
- * - Retains: Low-opacity (0.55) top-level city and water labels with crisp white halos
+ * - Background/Land: Crisp cool alabaster #F7F8FA
+ * - Parks/Forest: Soft muted architectural sage #DCEBD8 (fill-opacity: 0.78)
+ * - Water: Clean soft sky-blue #B4DCFA
+ * - Major roads: Motorway, trunk, primary crisp #FFFFFF fills with ultra-delicate #E2E8F0 casings
+ * - Decluttered: Shield, poi, transit, housenumber, building, street-label, minor roads stripped
+ * - Regional labels: Faint (0.45 opacity) high-level region labels (Delhi, Gurugram, Noida, Yamuna) with crisp white halos
  */
 
 const OPENFREEMAP_LIBERTY_URL = 'https://tiles.openfreemap.org/styles/liberty';
+
+// Allowed high-level NCR region labels
+const ALLOWED_REGIONS = ['Delhi', 'Gurugram', 'Noida', 'Yamuna'];
+
+// Exclude noisy towns/suburbs to keep focus strictly on high-level NCR regions
+const EXCLUDED_TOWNS = [
+  'New Delhi',
+  'Delhi Cantonment',
+  'Cantonment',
+  'New Delhi Cantonment',
+  'Bahadurgarh',
+  'Najafgarh',
+  'Loni',
+  'Najafgarh Sub-Division',
+  'Bahadurgarh Tehsil',
+  'Khora',
+  'Muradnagar',
+  'Modinagar',
+  'Dadri',
+  'Mandoli',
+  'Sultanpur',
+  'Faridabad Tehsil',
+  'Ballabhgarh',
+  'Ghaziabad',
+  'Faridabad',
+  'Sonipat',
+  'Kundli',
+  'Manesar',
+  'Sohna',
+  'Bhiwadi',
+];
 
 /**
  * Transforms an OpenFreeMap Liberty style into the Apple Maps crisp minimal design.
@@ -66,8 +97,9 @@ export function restyleLibertyStyle(rawStyle) {
         id.includes('neighborhood') ||
         id.includes('place_hamlet') ||
         id.includes('hamlet') ||
-        id === 'label_other' ||
-        id === 'label_state'
+        id.includes('label_other') ||
+        id === 'label_state' ||
+        id.includes('country')
       ) {
         return true;
       }
@@ -113,15 +145,15 @@ export function restyleLibertyStyle(rawStyle) {
     const id = (layer.id || '').toLowerCase();
     const type = layer.type;
 
-    // Background / Land: Clean cool alabaster #F5F7FA
+    // Background / Land: Crisp cool alabaster #F7F8FA
     if (type === 'background') {
       layer.paint = {
         ...(layer.paint || {}),
-        'background-color': '#F5F7FA',
+        'background-color': '#F7F8FA',
       };
     }
 
-    // Parks / Forest / Grass: Fresh soft sage-mint #D8EEDB (fill-opacity: 0.82)
+    // Parks / Forest / Greenery: Soft muted architectural sage #DCEBD8 (fill-opacity: 0.78)
     if (
       id.includes('park') ||
       id.includes('wood') ||
@@ -137,39 +169,37 @@ export function restyleLibertyStyle(rawStyle) {
         delete paint['fill-pattern']; // avoid missing pattern sprite warnings
         layer.paint = {
           ...paint,
-          'fill-color': '#D8EEDB',
-          'fill-opacity': 0.82,
-          'fill-outline-color': '#D8EEDB',
+          'fill-color': '#DCEBD8',
+          'fill-opacity': 0.78,
+          'fill-outline-color': '#DCEBD8',
         };
       } else if (type === 'line') {
         layer.paint = {
           ...(layer.paint || {}),
-          'line-color': '#D8EEDB',
+          'line-color': '#DCEBD8',
           'line-opacity': 0.6,
         };
       }
     }
 
-    // Water / Yamuna River: Luminous crisp sky-blue #A7D7FA with subtle #8BC8F5 lines
+    // Water / Yamuna River: Clean soft sky-blue #B4DCFA
     if (id.includes('water')) {
       if (type === 'fill') {
         layer.paint = {
           ...(layer.paint || {}),
-          'fill-color': '#A7D7FA',
+          'fill-color': '#B4DCFA',
           'fill-opacity': 0.98,
         };
       } else if (type === 'line') {
         layer.paint = {
           ...(layer.paint || {}),
-          'line-color': '#8BC8F5',
+          'line-color': '#B4DCFA',
           'line-opacity': 0.85,
         };
       }
     }
 
-    // Roads (Apple Maps Look):
-    // Motorway, trunk, and primary fills in crisp #FFFFFF with cool-gray casings (#DCE3EC)
-    // Secondary roads subtle #EDF1F5
+    // Major Roads: Motorway, trunk, primary fills in crisp #FFFFFF with ultra-delicate #E2E8F0 casings
     const isCasing = id.includes('casing');
     const isMotorwayOrTrunkOrPrimary =
       id.includes('motorway') || id.includes('trunk') || id.includes('primary');
@@ -180,14 +210,16 @@ export function restyleLibertyStyle(rawStyle) {
         if (isCasing) {
           layer.paint = {
             ...(layer.paint || {}),
-            'line-color': '#DCE3EC',
-            'line-opacity': 0.92,
+            'line-color': '#E2E8F0',
+            'line-opacity': 0.95,
+            'line-width': 3.4,
           };
         } else {
           layer.paint = {
             ...(layer.paint || {}),
             'line-color': '#FFFFFF',
             'line-opacity': 1.0,
+            'line-width': 2.2,
           };
         }
       }
@@ -195,8 +227,9 @@ export function restyleLibertyStyle(rawStyle) {
       if (type === 'line') {
         layer.paint = {
           ...(layer.paint || {}),
-          'line-color': '#EDF1F5',
-          'line-opacity': 0.85,
+          'line-color': '#F1F5F9',
+          'line-opacity': 0.75,
+          'line-width': 1.2,
         };
       }
     }
@@ -206,26 +239,52 @@ export function restyleLibertyStyle(rawStyle) {
       if (type === 'line') {
         layer.paint = {
           ...(layer.paint || {}),
-          'line-color': '#DCE3EC',
+          'line-color': '#E2E8F0',
           'line-opacity': 0.35,
           'line-width': 1.0,
         };
       }
     }
 
-    // Minimal, low-opacity (0.55) top-level city/water labels (Delhi, Gurugram, Noida, Yamuna) with crisp white halos
+    // City and Water labels: Faint (0.45 opacity) high-level region labels (Delhi, Gurugram, Noida, Yamuna) with crisp white halos
     if (type === 'symbol') {
+      const isWaterSymbol = id.includes('water');
+      const isCitySymbol = id.includes('city');
+
+      if (layer.layout) {
+        // Strip sprite icons from city symbols
+        if (layer.layout['icon-image']) {
+          layer.layout = { ...layer.layout, 'icon-image': '' };
+        }
+        // Simplify text-field to latin / en single line
+        layer.layout = {
+          ...layer.layout,
+          'text-field': ['coalesce', ['get', 'name:en'], ['get', 'name:latin'], ['get', 'name']],
+        };
+      }
+
+      // Filter out noisy peripheral towns in city layers; keep only allowed regional labels
+      if (isCitySymbol) {
+        const nameExpr = ['coalesce', ['get', 'name:en'], ['get', 'name:latin'], ['get', 'name']];
+        layer.filter = [
+          'all',
+          ...(layer.filter ? [layer.filter] : []),
+          ['!', ['in', nameExpr, ['literal', EXCLUDED_TOWNS]]],
+          ['in', nameExpr, ['literal', ALLOWED_REGIONS]],
+        ];
+      }
+
       layer.paint = {
         ...(layer.paint || {}),
-        'text-color': '#475569',
-        'text-opacity': 0.55,
+        'text-color': isWaterSymbol ? '#2563EB' : '#334155',
+        'text-opacity': 0.45,
         'text-halo-color': '#FFFFFF',
         'text-halo-width': 2.0,
         'text-halo-blur': 0.5,
       };
     }
 
-    // Landuse fills restyled to blend cleanly into cool alabaster #F5F7FA
+    // Landuse fills restyled to blend cleanly into cool alabaster #F7F8FA
     if (
       id.includes('residential') ||
       id.includes('hospital') ||
@@ -241,7 +300,7 @@ export function restyleLibertyStyle(rawStyle) {
         delete paint['fill-pattern'];
         layer.paint = {
           ...paint,
-          'fill-color': '#F5F7FA',
+          'fill-color': '#F7F8FA',
           'fill-opacity': 1.0,
         };
       }
@@ -292,7 +351,7 @@ export async function getMutedMapStyle() {
               id: 'background',
               type: 'background',
               paint: {
-                'background-color': '#F5F7FA',
+                'background-color': '#F7F8FA',
               },
             },
             {
@@ -301,7 +360,7 @@ export async function getMutedMapStyle() {
               source: 'openmaptiles',
               'source-layer': 'water',
               paint: {
-                'fill-color': '#A7D7FA',
+                'fill-color': '#B4DCFA',
                 'fill-opacity': 0.98,
               },
             },
@@ -311,8 +370,8 @@ export async function getMutedMapStyle() {
               source: 'openmaptiles',
               'source-layer': 'park',
               paint: {
-                'fill-color': '#D8EEDB',
-                'fill-opacity': 0.82,
+                'fill-color': '#DCEBD8',
+                'fill-opacity': 0.78,
               },
             },
             {
@@ -322,9 +381,9 @@ export async function getMutedMapStyle() {
               'source-layer': 'transportation',
               filter: ['in', 'class', 'motorway', 'trunk', 'primary'],
               paint: {
-                'line-color': '#DCE3EC',
-                'line-opacity': 0.92,
-                'line-width': 3.6,
+                'line-color': '#E2E8F0',
+                'line-opacity': 0.95,
+                'line-width': 3.4,
               },
             },
             {
@@ -346,9 +405,32 @@ export async function getMutedMapStyle() {
               'source-layer': 'transportation',
               filter: ['==', 'class', 'secondary'],
               paint: {
-                'line-color': '#EDF1F5',
-                'line-opacity': 0.85,
-                'line-width': 1.4,
+                'line-color': '#F1F5F9',
+                'line-opacity': 0.75,
+                'line-width': 1.2,
+              },
+            },
+            {
+              id: 'city_labels',
+              type: 'symbol',
+              source: 'openmaptiles',
+              'source-layer': 'place',
+              filter: [
+                'all',
+                ['in', 'class', 'city'],
+                ['in', 'name:latin', 'Delhi', 'Gurugram', 'Noida'],
+              ],
+              layout: {
+                'text-field': '{name:latin}',
+                'text-font': ['Noto Sans Regular'],
+                'text-size': 12,
+              },
+              paint: {
+                'text-color': '#334155',
+                'text-opacity': 0.45,
+                'text-halo-color': '#FFFFFF',
+                'text-halo-width': 2.0,
+                'text-halo-blur': 0.5,
               },
             },
           ],

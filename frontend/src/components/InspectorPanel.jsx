@@ -5,20 +5,12 @@ import {
   SkipBack,
   SkipForward,
   RotateCcw,
-  Clock,
-  Milestone,
   CheckCircle2,
   XCircle,
   AlertTriangle,
   Activity,
-  Layers,
-  ChevronRight,
-  TrendingDown,
-  ArrowRight,
-  HelpCircle,
-  ShieldAlert,
-  Flame,
   ListOrdered,
+  Square,
 } from 'lucide-react';
 
 export const CATEGORY_COLORS = {
@@ -51,6 +43,8 @@ export default function InspectorPanel({
   selectedPickupId = 'P1',
   currentStepIndex = 0,
   isPlaying = false,
+  isRunAll = false,
+  currentRunAllIndex = 0,
   playbackSpeed = 1,
   dispatchOrder = 'default',
   metric = 'time',
@@ -62,6 +56,8 @@ export default function InspectorPanel({
   rerouteNotice = null,
   onSelectPickupTab = () => {},
   onPlayPause = () => {},
+  onRunAll = () => {},
+  onStopAll = () => {},
   onPrevStep = () => {},
   onNextStep = () => {},
   onResetStep = () => {},
@@ -72,11 +68,11 @@ export default function InspectorPanel({
   onApplyDisruptionPreset = () => {},
   onPreviewPath = () => {},
 }) {
-  const [activeTab, setActiveTab] = useState('walkthrough'); // 'walkthrough' | 'disruptions' | 'benchmark'
-
   // Pickups and Centres lists
   const pickups = useMemo(() => nodes.filter((n) => n.kind === 'pickup'), [nodes]);
   const centres = useMemo(() => nodes.filter((n) => n.kind === 'centre'), [nodes]);
+
+  const totalPickups = pickupWalkthroughs.length || pickups.length || 4;
 
   // Current active walkthrough & node
   const currentWalkthrough = useMemo(() => {
@@ -117,9 +113,6 @@ export default function InspectorPanel({
     return { label: 'SIMULATION IDLE', bg: 'bg-slate-100 text-slate-700 border-slate-300' };
   }, [currentStep.event_type]);
 
-  // Active disruptions list
-  const activeDisruptions = edges.filter((e) => e.is_blocked === 1 || e.traffic_multiplier > 1.2);
-
   return (
     <div className="flex flex-col h-full bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden text-slate-800">
       {/* 1. Pickup Walkthrough Selector Tabs (Top of Left Panel) */}
@@ -138,6 +131,7 @@ export default function InspectorPanel({
             >
               <option value="default">Default (FIFO)</option>
               <option value="heaviest_first">Heaviest First</option>
+              <option value="lightest_first">Lightest First</option>
             </select>
           </div>
         </div>
@@ -183,8 +177,8 @@ export default function InspectorPanel({
           </button>
         </div>
 
-        {/* Playback Controls (Active when a single pickup is selected) */}
-        {selectedPickupId !== 'ALL' && (
+        {/* Playback Controls (Active when a single pickup is selected or Run All is active) */}
+        {selectedPickupId !== 'ALL' ? (
           <div className="flex items-center justify-between gap-1.5 bg-white p-1 rounded-xl border border-slate-200 shadow-2xs">
             <div className="flex items-center gap-1">
               <button
@@ -198,28 +192,58 @@ export default function InspectorPanel({
               <button
                 type="button"
                 onClick={onPrevStep}
-                disabled={currentStepIndex <= 0}
+                disabled={currentStepIndex <= 0 || isRunAll}
                 className="p-1.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 disabled:opacity-30 transition-colors"
                 title="Previous Step"
               >
                 <SkipBack className="w-3.5 h-3.5" />
               </button>
+
+              {/* Single Pickup Play/Pause */}
               <button
                 type="button"
                 onClick={onPlayPause}
-                className={`px-3 py-1.5 rounded-lg font-bold text-xs flex items-center gap-1.5 transition-colors shadow-xs ${
-                  isPlaying
+                disabled={isRunAll}
+                className={`px-2.5 py-1.5 rounded-lg font-bold text-xs flex items-center gap-1.5 transition-colors shadow-xs ${
+                  isRunAll
+                    ? 'opacity-40 bg-slate-100 text-slate-400 cursor-not-allowed'
+                    : isPlaying
                     ? 'bg-amber-600 hover:bg-amber-700 text-white'
                     : 'bg-emerald-600 hover:bg-emerald-700 text-white'
                 }`}
+                title="Play Current Pickup"
               >
                 {isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 fill-white" />}
                 <span>{isPlaying ? 'Pause' : 'Play'}</span>
               </button>
+
+              {/* Run All Sequential Multi-Pickup Simulation Mode */}
+              {isRunAll ? (
+                <button
+                  type="button"
+                  onClick={onStopAll}
+                  className="px-2.5 py-1.5 rounded-lg font-bold text-xs flex items-center gap-1.5 transition-colors shadow-xs bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300"
+                  title="Stop Sequential Simulation"
+                >
+                  <Square className="w-3.5 h-3.5 fill-rose-600 text-rose-600" />
+                  <span>Stop All ({currentRunAllIndex + 1}/{totalPickups})</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={onRunAll}
+                  className="px-2.5 py-1.5 rounded-lg font-bold text-xs flex items-center gap-1.5 transition-colors shadow-xs bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300"
+                  title="Run All Pickups Sequentially (Wipes Clean Between Pickups)"
+                >
+                  <Play className="w-3.5 h-3.5 fill-emerald-700 text-emerald-700" />
+                  <span>Run All</span>
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={onNextStep}
-                disabled={currentStepIndex >= totalSteps - 1}
+                disabled={currentStepIndex >= totalSteps - 1 || isRunAll}
                 className="p-1.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 disabled:opacity-30 transition-colors"
                 title="Next Step"
               >
@@ -249,6 +273,19 @@ export default function InspectorPanel({
                 </button>
               ))}
             </div>
+          </div>
+        ) : (
+          /* All Summary Playback Bar */
+          <div className="flex items-center justify-between gap-1.5 bg-white p-1.5 rounded-xl border border-slate-200 shadow-2xs">
+            <span className="text-xs font-semibold text-slate-600 pl-1">All Pickups Optimization Summary</span>
+            <button
+              type="button"
+              onClick={onRunAll}
+              className="px-3 py-1.5 rounded-lg font-bold text-xs flex items-center gap-1.5 transition-colors shadow-xs bg-emerald-600 hover:bg-emerald-700 text-white"
+            >
+              <Play className="w-3.5 h-3.5 fill-white text-white" />
+              <span>Run All Simulation</span>
+            </button>
           </div>
         )}
       </div>

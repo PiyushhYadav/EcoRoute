@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Routes, Route, NavLink, Link, useNavigate } from 'react-router-dom';
 import {
   Truck,
@@ -10,6 +10,8 @@ import {
   ExternalLink,
   Layers,
   Route as RouteIcon,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
 import OverviewPage from './pages/OverviewPage';
 import DispatchPage from './pages/DispatchPage';
@@ -17,16 +19,35 @@ import SchedulePage from './pages/SchedulePage';
 import AnalyticsPage from './pages/AnalyticsPage';
 import ConceptsModal from './components/ConceptsModal';
 import { api } from './api/client';
+import {
+  isSoundMuted,
+  setSoundMuted,
+  subscribeMute,
+  stopAllSounds,
+} from './utils/soundEngine';
 
 export default function App() {
   const [isConceptsOpen, setIsConceptsOpen] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const [muted, setMuted] = useState(isSoundMuted());
   const navigate = useNavigate();
+
+  useEffect(() => {
+    const unsub = subscribeMute((newMuted) => {
+      setMuted(newMuted);
+    });
+    return unsub;
+  }, []);
+
+  const handleToggleSound = () => {
+    setSoundMuted(!muted);
+  };
 
   const handleResetDemo = async () => {
     if (!window.confirm('Reset all nodes, road disruptions, and pickups back to default Delhi NCR scenario?')) {
       return;
     }
+    stopAllSounds();
     setResetting(true);
     try {
       await api.resetDemo();
@@ -139,6 +160,26 @@ export default function App() {
             >
               <RotateCcw className={`w-3.5 h-3.5 ${resetting ? 'animate-spin' : ''}`} />
               <span className="hidden sm:inline">Reset Demo</span>
+            </button>
+
+            {/* Sound On / Muted Toggle Button */}
+            <button
+              type="button"
+              onClick={handleToggleSound}
+              className={`p-1.5 sm:px-3 sm:py-1.5 rounded-xl border transition-all flex items-center gap-1.5 shadow-2xs text-xs font-semibold ${
+                muted
+                  ? 'border-slate-200 bg-slate-100/90 text-slate-400 hover:text-slate-600'
+                  : 'border-slate-200 bg-white hover:bg-emerald-50 text-slate-700 hover:text-emerald-700'
+              }`}
+              title={muted ? 'Enable sound effects' : 'Mute sound effects'}
+              aria-label={muted ? 'Enable sound effects' : 'Mute sound effects'}
+            >
+              {muted ? (
+                <VolumeX className="w-3.5 h-3.5 text-slate-400" />
+              ) : (
+                <Volume2 className="w-3.5 h-3.5 text-emerald-600" />
+              )}
+              <span className="hidden sm:inline">{muted ? 'Muted' : 'Sound On'}</span>
             </button>
           </div>
         </div>
