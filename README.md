@@ -1,5 +1,7 @@
 # EcoRoute — E-Waste Collection Route Optimisation Platform
 
+🌐 Live Application: ecoroute-by-piyush.onrender.com
+
 **EcoRoute** is a production-ready, full-stack geospatial logistics platform designed to optimize municipal electronic waste (e-waste) collection and routing across urban networks (Delhi NCR pre-seeded network). Powered by **Dijkstra’s Algorithm** (via binary min-heaps) and **Greedy Capacity-Constrained Allocation**, EcoRoute balances road network disruptions (traffic congestion, arterial roadblocks) with specialized material processing certifications and facility volume limits.
 
 ## Platform Preview
