@@ -680,6 +680,7 @@ export default function MapCanvas({
   allocations = [],
   isPlaying = false,
   isRunAll = false,
+  replayTrigger = 0,
   onSelectPickup = () => {},
   onMetricChange = () => {},
   onSelectEdge = () => {},
@@ -714,6 +715,7 @@ export default function MapCanvas({
   const ignitionTimeoutRef = useRef(null);
   const idleSoundTimeoutRef = useRef(null);
   const coolDownTimeoutRef = useRef(null);
+  const vanishTimeoutRef = useRef(null);
   const arrivalBrakeTimeoutRef = useRef(null);
   const finishCallbackTimeoutRef = useRef(null);
   const isFocusModeRef = useRef(false);
@@ -1017,6 +1019,31 @@ export default function MapCanvas({
       });
     }
 
+    // edges-traffic-source & layer: edges-traffic (crisp amber/orange line-width: 3.0 for traffic > 1.0)
+    if (!targetMap.getSource('edges-traffic-source')) {
+      targetMap.addSource('edges-traffic-source', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+      });
+    }
+    if (!targetMap.getLayer('edges-traffic')) {
+      targetMap.addLayer({
+        id: 'edges-traffic',
+        type: 'line',
+        source: 'edges-traffic-source',
+        layout: {
+          'line-cap': 'round',
+          'line-join': 'round',
+        },
+        paint: {
+          'line-color': '#F59E0B',
+          'line-width': 3.0,
+          'line-opacity': 0.95,
+          'line-opacity-transition': { duration: 350, delay: 0 },
+        },
+      });
+    }
+
     // 2. edges-rejected-source & layer: edges-rejected
     if (!targetMap.getSource('edges-rejected-source')) {
       targetMap.addSource('edges-rejected-source', {
@@ -1086,7 +1113,7 @@ export default function MapCanvas({
         },
         paint: {
           'line-color': '#EF4444',
-          'line-width': 2.4,
+          'line-width': 3.0,
           'line-dasharray': [2, 2],
           'line-opacity': 1.0,
           'line-opacity-transition': { duration: 350, delay: 0 },
@@ -1254,6 +1281,7 @@ export default function MapCanvas({
 
       const baseSource = targetMap.getSource('edges-base-source');
       const hitSource = targetMap.getSource('edges-hit-source');
+      const trafficSource = targetMap.getSource('edges-traffic-source');
       const blockedSource = targetMap.getSource('edges-blocked-source');
       const sptSource = targetMap.getSource('edges-spt-source');
       const rejectedSource = targetMap.getSource('edges-rejected-source');
@@ -1272,6 +1300,7 @@ export default function MapCanvas({
 
       const baseFeatures = [];
       const hitFeatures = [];
+      const trafficFeatures = [];
       const blockedFeatures = [];
       const sptFeatures = [];
       const rejectedFeatures = [];
@@ -1285,6 +1314,7 @@ export default function MapCanvas({
         }
 
         const polylineCoords = getEdgePolyline(edge, u, v);
+        const trafficMult = edge.traffic_multiplier || edge.traffic_factor || 1.0;
 
         const feature = {
           type: 'Feature',
@@ -1295,7 +1325,7 @@ export default function MapCanvas({
             base_distance_km: edge.base_distance_km,
             base_time_min: edge.base_time_min,
             is_blocked: edge.is_blocked ? 1 : 0,
-            traffic_factor: edge.traffic_factor || 1.0,
+            traffic_factor: trafficMult,
           },
           geometry: {
             type: 'LineString',
@@ -1311,6 +1341,11 @@ export default function MapCanvas({
         if (edge.is_blocked || previousPathEdgesSet.has(edge.id)) {
           blockedFeatures.push(feature);
           return;
+        }
+
+        // Heavy traffic edges: render amber casing on edges-traffic layer when not blocked
+        if (trafficMult > 1.0) {
+          trafficFeatures.push(feature);
         }
 
         // Prevent Instant Snapping: EXCLUDE (u -> v) from static sources while animating
@@ -1343,6 +1378,7 @@ export default function MapCanvas({
 
       baseSource.setData({ type: 'FeatureCollection', features: baseFeatures });
       hitSource.setData({ type: 'FeatureCollection', features: hitFeatures });
+      if (trafficSource) trafficSource.setData({ type: 'FeatureCollection', features: trafficFeatures });
       if (blockedSource) blockedSource.setData({ type: 'FeatureCollection', features: blockedFeatures });
       if (sptSource) sptSource.setData({ type: 'FeatureCollection', features: sptFeatures });
       if (rejectedSource) rejectedSource.setData({ type: 'FeatureCollection', features: rejectedFeatures });
@@ -1537,6 +1573,10 @@ export default function MapCanvas({
         clearTimeout(coolDownTimeoutRef.current);
         coolDownTimeoutRef.current = null;
       }
+      if (vanishTimeoutRef.current) {
+        clearTimeout(vanishTimeoutRef.current);
+        vanishTimeoutRef.current = null;
+      }
       if (arrivalBrakeTimeoutRef.current) {
         clearTimeout(arrivalBrakeTimeoutRef.current);
         arrivalBrakeTimeoutRef.current = null;
@@ -1595,14 +1635,14 @@ export default function MapCanvas({
       const midLat = (Number(u.lat) + Number(v.lat)) / 2;
 
       const isBlocked = !!edge.is_blocked;
-      const traffic = edge.traffic_factor || 1.0;
+      const traffic = edge.traffic_multiplier || edge.traffic_factor || 1.0;
       const isRoute = activePathEdgesSet.has(edge.id);
       const isActiveRelaxation =
         edge.id === activeEdgeId ||
         (activeFromNode === edge.source_id && activeToNode === edge.target_id) ||
         (activeFromNode === edge.target_id && activeToNode === edge.source_id);
 
-      // Cost value formatting: compact without trailing .0 (e.g. 8m, 26m, 14km)
+      // Cost value formatting: compact without trailing .0 (e.g. 8m, 17.5m ⚡, 14km)
       let displayCost = '';
       if (isBlocked) {
         displayCost = '⛔ Blocked';
@@ -1610,16 +1650,12 @@ export default function MapCanvas({
         const effectiveTime = (edge.base_time_min || 0) * traffic;
         const rounded = Math.round(effectiveTime * 10) / 10;
         const numStr = Number.isInteger(rounded) ? `${rounded}` : rounded.toFixed(1);
-        displayCost = `${numStr}m`;
+        displayCost = traffic > 1.0 ? `${numStr}m ⚡` : `${numStr}m`;
       } else {
-        const distKm = edge.base_distance_km || 0;
-        const rounded = Math.round(distKm * 10) / 10;
+        const effectiveDist = (edge.base_distance_km || 0) * (traffic > 1.0 ? traffic : 1.0);
+        const rounded = Math.round(effectiveDist * 10) / 10;
         const numStr = Number.isInteger(rounded) ? `${rounded}` : rounded.toFixed(1);
-        displayCost = `${numStr}km`;
-      }
-
-      if (traffic > 1.0 && !isBlocked) {
-        displayCost += ` ${traffic}×`;
+        displayCost = traffic > 1.0 ? `${numStr}km ⚡` : `${numStr}km`;
       }
 
       let marker = currentPills[edge.id];
@@ -1654,9 +1690,11 @@ export default function MapCanvas({
       if (isBlocked) {
         pillClass = 'bg-rose-50 border-rose-300 text-rose-700 font-bold';
       } else if (isRoute) {
-        pillClass = 'bg-emerald-600 border-emerald-600 text-white shadow-2xs';
+        pillClass = 'bg-emerald-600 border-emerald-600 text-white shadow-2xs font-bold';
       } else if (isActiveRelaxation) {
-        pillClass = 'bg-amber-500 border-amber-500 text-white font-bold scale-105 shadow-xs';
+        pillClass = 'bg-amber-500 border-amber-500 text-white font-bold shadow-xs';
+      } else if (traffic > 1.0) {
+        pillClass = 'bg-amber-50 text-amber-800 border-amber-300 font-semibold shadow-2xs';
       }
 
       pillEl.innerHTML = `
@@ -1711,7 +1749,7 @@ export default function MapCanvas({
       }
 
       // Dijkstra Distance Cost Chip:
-      // Show tiny floating cost pills (0m, 8m, 17m) ONLY on nodes Dijkstra has discovered/relaxed
+      // Show tiny floating cost pills (0m, 8m, 17.5m) ONLY on nodes Dijkstra has discovered/relaxed
       // Untouched infinity nodes remain completely unbadged
       const dist = dijkstraDistances[node.id];
       let distBadge = '';
@@ -1719,7 +1757,7 @@ export default function MapCanvas({
         const rounded = Math.round(Number(dist) * 10) / 10;
         const numStr = Number.isInteger(rounded) ? `${rounded}` : rounded.toFixed(1);
         const unit = metric === 'time' ? 'm' : 'km';
-        distBadge = `<div class="eco-cost-chip mb-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-mono bg-white/95 border border-slate-200/90 text-slate-700 shadow-2xs edge-cost-pill leading-none pointer-events-none select-none" style="font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; pointer-events: none;">${numStr}${unit}</div>`;
+        distBadge = `<div class="eco-cost-chip px-1.5 py-0.5 rounded-full text-[10px] font-mono bg-white/95 border border-slate-200 shadow-xs text-slate-700 leading-none pointer-events-none select-none whitespace-nowrap z-20" style="font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums;">${numStr}${unit}</div>`;
       }
 
       // Centre Decision Badges during Greedy evaluation and confirmation steps
@@ -1932,53 +1970,45 @@ export default function MapCanvas({
         }
       }
 
-      // Clean Single-Line Haloed Labels directly below each node
+      // Clean Single-Line Haloed Labels with directional offsets
       const labelText = getNodeDisplayLabel(node);
+      const isR3 = node.id === 'R3';
 
-      if (nodeKind === 'centre') {
-        const isR3 = node.id === 'R3';
-        const labelAndBadgeHtml = isR3
-          ? `
-            <div style="position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(100% + 4px); white-space: nowrap; pointer-events: none; display: flex; flex-direction: column; align-items: center;">
-              ${distBadge}
-              <div class="map-halo-label pointer-events-none select-none">${labelText}</div>
-              ${greedyBadge}
-            </div>
-          `
-          : `
-            ${distBadge ? `<div style="position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(100% + 3px); white-space: nowrap; pointer-events: none;">${distBadge}</div>` : ''}
-            <div style="position: absolute; left: 50%; transform: translateX(-50%); top: calc(100% + 3px); white-space: nowrap; pointer-events: none; display: flex; flex-direction: column; align-items: center;">
-              <div class="map-halo-label pointer-events-none select-none">${labelText}</div>
-              ${greedyBadge}
-            </div>
-          `;
+      let labelTransform = 'translateX(-50%)';
+      if (node.id === 'R2') {
+        labelTransform = 'translate(-78%, 2px)';
+      } else if (node.id === 'P4') {
+        labelTransform = 'translate(-22%, 2px)';
+      } else if (node.id === 'P2') {
+        labelTransform = 'translate(-75%, 0)';
+      }
 
-        el.style.width = '24px';
-        el.style.height = '24px';
-
-        el.innerHTML = `
-          <div class="node-hit-target" style="position: relative; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; pointer-events: auto; cursor: pointer;">
-            ${isConnectSource ? `<div class="absolute -inset-2 rounded-full bg-amber-400/35 animate-pulse pointer-events-none"></div>` : ''}
-            ${pinHtml}
-            ${labelAndBadgeHtml}
-          </div>
-        `;
-      } else {
-        el.style.width = '';
-        el.style.height = '';
-
-        el.innerHTML = `
-          <div class="relative flex flex-col items-center select-none pointer-events-none">
-            ${isConnectSource ? `<div class="absolute -inset-2 rounded-full bg-amber-400/35 animate-pulse pointer-events-none"></div>` : ''}
+      const labelAndBadgeHtml = isR3
+        ? `
+          <div style="position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(100% + 4px); white-space: nowrap; pointer-events: none; display: flex; flex-direction: column; align-items: center; z-index: 20;">
             ${distBadge}
-            <div class="node-hit-target" style="width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; pointer-events: auto; cursor: pointer;">
-              ${pinHtml}
-            </div>
-            <div class="map-halo-label mt-0.5 pointer-events-none select-none">${labelText}</div>
+            <div class="map-halo-label pointer-events-none select-none">${labelText}</div>
+            ${greedyBadge}
+          </div>
+        `
+        : `
+          ${distBadge ? `<div style="position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(100% + 4px); white-space: nowrap; pointer-events: none; z-index: 20;">${distBadge}</div>` : ''}
+          <div style="position: absolute; left: 50%; transform: ${labelTransform}; top: calc(100% + 4px); white-space: nowrap; pointer-events: none; display: flex; flex-direction: column; align-items: center; z-index: 10;">
+            <div class="map-halo-label pointer-events-none select-none">${labelText}</div>
             ${greedyBadge}
           </div>
         `;
-      }
+
+      el.style.width = '24px';
+      el.style.height = '24px';
+
+      el.innerHTML = `
+        <div class="node-hit-target" style="position: relative; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; pointer-events: auto; cursor: pointer;">
+          ${isConnectSource ? `<div class="absolute -inset-2 rounded-full bg-amber-400/35 animate-pulse pointer-events-none"></div>` : ''}
+          ${pinHtml}
+          ${labelAndBadgeHtml}
+        </div>
+      `;
 
       const hitTarget = el.querySelector('.node-hit-target');
       if (hitTarget) {
@@ -2279,6 +2309,7 @@ export default function MapCanvas({
     const lineLayersToFade = [
       'edges-base',
       'edges-casing',
+      'edges-traffic',
       'edges-spt',
       'edges-rejected',
       'edges-blocked',
@@ -2378,6 +2409,7 @@ export default function MapCanvas({
         const defaultOpacities = {
           'edges-base': 0.68,
           'edges-casing': 0.9,
+          'edges-traffic': 0.95,
           'edges-spt': 1.0,
           'edges-rejected': 0.8,
           'edges-blocked': 1.0,
@@ -2416,6 +2448,10 @@ export default function MapCanvas({
       clearTimeout(coolDownTimeoutRef.current);
       coolDownTimeoutRef.current = null;
     }
+    if (vanishTimeoutRef.current) {
+      clearTimeout(vanishTimeoutRef.current);
+      vanishTimeoutRef.current = null;
+    }
     if (arrivalBrakeTimeoutRef.current) {
       clearTimeout(arrivalBrakeTimeoutRef.current);
       arrivalBrakeTimeoutRef.current = null;
@@ -2433,6 +2469,11 @@ export default function MapCanvas({
 
     if (carMarkerRef.current) {
       setCarState({ headlights: false, brakelights: false, rumble: false, puffing: false });
+      const el = carMarkerRef.current.getElement();
+      if (el) {
+        el.style.opacity = '0';
+        el.style.display = 'none';
+      }
       carMarkerRef.current.remove();
       carMarkerRef.current = null;
     }
@@ -2510,6 +2551,10 @@ export default function MapCanvas({
       clearTimeout(coolDownTimeoutRef.current);
       coolDownTimeoutRef.current = null;
     }
+    if (vanishTimeoutRef.current) {
+      clearTimeout(vanishTimeoutRef.current);
+      vanishTimeoutRef.current = null;
+    }
     if (arrivalBrakeTimeoutRef.current) {
       clearTimeout(arrivalBrakeTimeoutRef.current);
       arrivalBrakeTimeoutRef.current = null;
@@ -2556,16 +2601,36 @@ export default function MapCanvas({
       (activeMetric === 'time' ? alloc?.total_time_min : alloc?.total_distance_km) ??
       (computedCost > 0 ? computedCost : (activeMetric === 'time' ? fallback.time : fallback.dist) ?? 15);
 
+    // Compute car final stopping position along the last segment (prevCoord -> endCoord)
+    // stopping ~160 meters / ~24px at zoom 13.6 short of endCoord, clamped to at most 35% of final segment length
+    const endCoord = fullRouteCoords[fullRouteCoords.length - 1];
+    const prevCoord = fullRouteCoords[fullRouteCoords.length - 2];
+    const midLatRad = ((prevCoord[1] + endCoord[1]) / 2) * (Math.PI / 180);
+    const cosLat = Math.cos(midLatRad);
+    const dx = (endCoord[0] - prevCoord[0]) * cosLat;
+    const dy = endCoord[1] - prevCoord[1];
+    const segDistDeg = Math.hypot(dx, dy);
+    // 160 meters in degrees (~111,139 meters per degree)
+    const targetOffsetDeg = 160 / 111139;
+    const offsetRatio = segDistDeg > 0 ? Math.min(0.35, targetOffsetDeg / segDistDeg) : 0;
+    const finalCarCoord = [
+      endCoord[0] - (endCoord[0] - prevCoord[0]) * offsetRatio,
+      endCoord[1] - (endCoord[1] - prevCoord[1]) * offsetRatio,
+    ];
+    const carRouteCoords = [...fullRouteCoords.slice(0, -1), finalCarCoord];
+
     // Instantiate or place Mr. Bean's Mini Cooper
     let carMarker = carMarkerRef.current;
     if (!carMarker) {
       const carEl = document.createElement('div');
-      carEl.className = 'vehicle-marker-wrapper';
-      carEl.style.zIndex = '15';
+      carEl.className = 'vehicle-marker-wrapper eco-car-marker';
+      carEl.style.zIndex = '100';
       carEl.style.position = 'absolute';
       carEl.style.pointerEvents = 'none';
       carEl.style.willChange = 'transform';
       carEl.style.transition = 'none !important';
+      carEl.style.display = 'block';
+      carEl.style.opacity = '1';
       carEl.innerHTML = MR_BEAN_MINI_COOPER_HTML;
 
       carMarker = new maplibregl.Marker({
@@ -2577,8 +2642,19 @@ export default function MapCanvas({
         .addTo(map);
 
       carMarkerRef.current = carMarker;
+      const rootEl = carMarker.getElement();
+      rootEl.classList.add('eco-car-marker');
+      rootEl.style.zIndex = '100';
+      rootEl.style.display = 'block';
+      rootEl.style.opacity = '1';
+      rootEl.style.transition = 'none !important';
     } else {
-      carMarker.getElement().style.display = 'block';
+      const rootEl = carMarker.getElement();
+      rootEl.classList.add('eco-car-marker');
+      rootEl.style.zIndex = '100';
+      rootEl.style.display = 'block';
+      rootEl.style.opacity = '1';
+      rootEl.style.transition = 'none !important';
       carMarker.setLngLat(fullRouteCoords[0]);
     }
 
@@ -2698,7 +2774,8 @@ export default function MapCanvas({
           setCarState({ puffing: false });
         }
 
-        const { partialCoords, tipCoord, angleDeg, bearingDeg } = slicePolylineByProgress(fullRouteCoords, progress);
+        const { partialCoords } = slicePolylineByProgress(fullRouteCoords, progress);
+        const { tipCoord, angleDeg, bearingDeg } = slicePolylineByProgress(carRouteCoords, progress);
 
         if (carMarkerRef.current) {
           carMarkerRef.current.setLngLat(tipCoord);
@@ -2770,15 +2847,21 @@ export default function MapCanvas({
           }
 
           if (carMarkerRef.current) {
-            carMarkerRef.current.setLngLat(fullRouteCoords[fullRouteCoords.length - 1]);
+            carMarkerRef.current.setLngLat(finalCarCoord);
           }
           if (map && isFocusModeRef.current) {
             map.jumpTo({
-              center: fullRouteCoords[fullRouteCoords.length - 1],
+              center: finalCarCoord,
               pitch: 45,
               bearing: cameraBearingRef.current,
             });
           }
+          const finalSlice = slicePolylineByProgress(carRouteCoords, 1);
+          const arrivalInner = carMarkerRef.current?.getElement()?.querySelector('#eco-mr-bean-mini');
+          if (arrivalInner) {
+            arrivalInner.style.transform = `rotate(${finalSlice.angleDeg - cameraBearingRef.current}deg)`;
+          }
+
           if (routeDrawnSource) {
             routeDrawnSource.setData({
               type: 'FeatureCollection',
@@ -2842,15 +2925,34 @@ export default function MapCanvas({
             stopCarIdle();
             setCarState({ headlights: false, brakelights: false, rumble: false, puffing: false });
 
-            // Smoothly exit Spotlight Focus Mode (550ms transition restoring camera & full network)
-            exitFocusMode(550);
+            // Guaranteed clean vanish before exiting focus mode: fade smoothly to opacity 0 (220ms) then set display: 'none'
+            const carEl = carMarkerRef.current?.getElement();
+            if (carEl) {
+              carEl.style.transition = 'opacity 220ms ease';
+              carEl.style.opacity = '0';
+            }
 
-            // After exit transition completes (~550ms), finish drive and invoke onVehicleFinish
-            finishCallbackTimeoutRef.current = setTimeout(() => {
-              finishCallbackTimeoutRef.current = null;
-              setIsCarDriving(false);
-              onVehicleFinishRef.current?.(thisPickupId);
-            }, 550);
+            vanishTimeoutRef.current = setTimeout(() => {
+              vanishTimeoutRef.current = null;
+
+              if (carMarkerRef.current) {
+                const el = carMarkerRef.current.getElement();
+                if (el) {
+                  el.style.display = 'none';
+                  el.style.transition = 'none !important';
+                }
+              }
+
+              // Smoothly exit Spotlight Focus Mode (550ms transition restoring camera & full network)
+              exitFocusMode(550);
+
+              // After exit transition completes (~550ms), finish drive and invoke onVehicleFinish
+              finishCallbackTimeoutRef.current = setTimeout(() => {
+                finishCallbackTimeoutRef.current = null;
+                setIsCarDriving(false);
+                onVehicleFinishRef.current?.(thisPickupId);
+              }, 550);
+            }, 220);
           }, 1000);
         }
       };
@@ -2899,6 +3001,22 @@ export default function MapCanvas({
     }
     prevIsPlayingRef.current = isPlaying;
   }, [isPlaying, isRunAll, cleanupVehicleAndFocusMode]);
+
+  // Replay Trigger listener (fired by Keyboard Shortcut 'R' or replay buttons)
+  useEffect(() => {
+    if (
+      replayTrigger > 0 &&
+      activePickupId &&
+      isConfirm &&
+      activePathNodes.length >= 2 &&
+      !isPlaying &&
+      !isRunAll &&
+      !isCarDrivingRef.current
+    ) {
+      unlockAudio();
+      animateVehicle();
+    }
+  }, [replayTrigger, activePickupId, isConfirm, activePathNodes, isPlaying, isRunAll, animateVehicle]);
 
   // 9. Instant Local Search + External Photon Geocoder (0 forbidden URLs)
   const handleSearchQueryChange = (e) => {
@@ -3388,22 +3506,48 @@ export default function MapCanvas({
         </button>
       </div>
 
-      {/* Subtle Replay Drive Button (visible ONLY when idle on a completed route) */}
-      {activePickupId && isConfirm && activePathNodes.length >= 2 && !isPlaying && !isRunAll && !isCarDriving && (
-        <div className="absolute bottom-8 left-4 z-30 flex items-center gap-2">
+      {/* Bottom-left Floating Controls & Map Legend */}
+      <div className="absolute bottom-4 left-4 z-20 flex flex-wrap items-center gap-2 pointer-events-none">
+        {/* Subtle Replay Drive Button (visible ONLY when idle on a completed route) */}
+        {activePickupId && isConfirm && activePathNodes.length >= 2 && !isPlaying && !isRunAll && !isCarDriving && (
           <button
             type="button"
             onClick={() => {
               unlockAudio();
               animateVehicle();
             }}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/80 text-white text-xs font-medium shadow-sm hover:bg-slate-800 backdrop-blur-md transition-all border border-slate-700/50"
+            className="pointer-events-auto flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/90 text-white text-xs font-medium shadow-md hover:bg-slate-800 backdrop-blur-md transition-all border border-slate-700/60 cursor-pointer"
+            title="Replay delivery drive (Press R)"
           >
             <Play className="w-3 h-3 text-lime-400 fill-lime-400" />
             <span>Replay Drive</span>
+            <span className="text-[10px] text-slate-400 font-mono ml-0.5">R</span>
           </button>
+        )}
+
+        {/* Compact Floating Map Legend */}
+        <div className="eco-map-legend pointer-events-auto flex items-center gap-2.5 px-3 py-1.5 rounded-xl bg-white/90 backdrop-blur-md border border-slate-200/80 shadow-xs text-[11px] text-slate-600 transition-opacity duration-300">
+          <div className="flex items-center gap-1.5">
+            <span className="w-3.5 h-[2.5px] rounded-full bg-slate-400"></span>
+            <span>Normal</span>
+          </div>
+          <span className="text-slate-300 text-[10px]">•</span>
+          <div className="flex items-center gap-1.5">
+            <span className="w-3.5 h-[2.5px] rounded-full bg-amber-500"></span>
+            <span>Traffic (2.5×)</span>
+          </div>
+          <span className="text-slate-300 text-[10px]">•</span>
+          <div className="flex items-center gap-1.5">
+            <span className="w-3.5 h-[2px] border-b-2 border-dashed border-rose-500"></span>
+            <span>Blocked</span>
+          </div>
+          <span className="text-slate-300 text-[10px]">•</span>
+          <div className="flex items-center gap-1.5">
+            <span className="w-3.5 h-[3px] rounded-full bg-emerald-600"></span>
+            <span className="font-medium text-slate-700">Optimal Route</span>
+          </div>
         </div>
-      )}
+      </div>
 
       {/* 2.5D Spotlight Focus Mode Live Delivery Telemetry Pill */}
       <div

@@ -63,6 +63,9 @@ export default function DispatchPage() {
   // Loading indicator
   const [loading, setLoading] = useState(true);
 
+  // Replay trigger state for KeyR presentation shortcut
+  const [replayTrigger, setReplayTrigger] = useState(0);
+
   // Load optimization data from API
   const loadData = useCallback(
     async (order = dispatchOrder, activeMetric = metric) => {
@@ -370,6 +373,54 @@ export default function DispatchPage() {
     handleResetStep();
   };
 
+  // Keyboard Presentation Shortcuts on /dispatch: Space, ArrowRight, ArrowLeft, KeyR
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      // Strictly ignore shortcuts if focus is inside form input, textarea, select, or if any modal is open
+      if (isDisruptionModalOpen || isNodeModalOpen) return;
+      const target = e.target;
+      const tag = target?.tagName?.toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || tag === 'select' || target?.isContentEditable) {
+        return;
+      }
+
+      if (e.code === 'Space') {
+        e.preventDefault();
+        handlePlayPause();
+      } else if (e.code === 'ArrowRight') {
+        e.preventDefault();
+        handleNextStep();
+      } else if (e.code === 'ArrowLeft') {
+        e.preventDefault();
+        handlePrevStep();
+      } else if (e.code === 'KeyR') {
+        if (
+          selectedPickupId !== 'ALL' &&
+          activeStep?.event_type === 'route_confirm' &&
+          (activeStep?.path_nodes || []).length >= 2 &&
+          !isPlaying &&
+          !isRunAll
+        ) {
+          e.preventDefault();
+          setReplayTrigger((prev) => prev + 1);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [
+    isDisruptionModalOpen,
+    isNodeModalOpen,
+    handlePlayPause,
+    handleNextStep,
+    handlePrevStep,
+    selectedPickupId,
+    activeStep,
+    isPlaying,
+    isRunAll,
+  ]);
+
   // Edge Disruption Handlers
   const handleEdgeClick = (edge) => {
     setSelectedEdge(edge);
@@ -590,6 +641,7 @@ export default function DispatchPage() {
             allocations={greedySummary?.allocations || []}
             isPlaying={isPlaying}
             isRunAll={isRunAll}
+            replayTrigger={replayTrigger}
             onSelectPickup={handleSelectPickupTab}
             onMetricChange={handleSetMetric}
             onSelectEdge={handleEdgeClick}

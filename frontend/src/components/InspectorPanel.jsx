@@ -116,7 +116,7 @@ export default function InspectorPanel({
   return (
     <div className="flex flex-col h-full bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden text-slate-800">
       {/* 1. Pickup Walkthrough Selector Tabs (Top of Left Panel) */}
-      <div className="p-2 border-b border-slate-200 bg-slate-50/90 flex flex-col gap-2">
+      <div className="p-2 border-b border-slate-200 bg-slate-50/90 flex flex-col gap-1.5 shrink-0">
         <div className="flex items-center justify-between">
           <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
             Pickup Walkthrough Focus:
@@ -136,8 +136,8 @@ export default function InspectorPanel({
           </div>
         </div>
 
-        {/* Tab Buttons for P1, P2, P3, P4 + All Summary */}
-        <div className="flex flex-wrap items-center gap-1.5 pb-0.5">
+        {/* Tab Buttons for P1, P2, P3, P4 + All Summary (Compact vertical spacing, max-h with thin scroll if >6) */}
+        <div className="flex flex-wrap items-center gap-1.5 py-0.5 max-h-20 overflow-y-auto">
           {pickups.map((p) => {
             const isSelected = selectedPickupId === p.id;
             return (
@@ -145,18 +145,18 @@ export default function InspectorPanel({
                 key={p.id}
                 type="button"
                 onClick={() => onSelectPickupTab(p.id)}
-                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 ${
+                className={`px-2 py-1 rounded-lg text-xs font-bold transition-all whitespace-nowrap shrink-0 flex items-center gap-1.5 ${
                   isSelected
                     ? 'bg-slate-900 text-white shadow-xs'
                     : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
                 }`}
               >
                 <span
-                  className="w-2 h-2 rounded-full"
+                  className="w-2 h-2 rounded-full shrink-0"
                   style={{ backgroundColor: CATEGORY_COLORS[p.waste_type] || '#64748B' }}
                 />
-                <span>{p.id}</span>
-                <span className={`text-[10px] font-normal ${isSelected ? 'text-slate-300' : 'text-slate-500'}`}>
+                <span className="whitespace-nowrap">{p.id}</span>
+                <span className={`text-[10px] font-normal whitespace-nowrap ${isSelected ? 'text-slate-300' : 'text-slate-500'}`}>
                   {p.name.split(' ')[0]}
                 </span>
               </button>
@@ -166,37 +166,38 @@ export default function InspectorPanel({
           <button
             type="button"
             onClick={() => onSelectPickupTab('ALL')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1 ${
+            className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all whitespace-nowrap shrink-0 flex items-center gap-1 ${
               selectedPickupId === 'ALL'
                 ? 'bg-emerald-600 text-white shadow-xs'
                 : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
             }`}
           >
-            <ListOrdered className="w-3.5 h-3.5" />
-            <span>All Summary</span>
+            <ListOrdered className="w-3.5 h-3.5 shrink-0" />
+            <span className="whitespace-nowrap">All Summary</span>
           </button>
         </div>
 
         {/* Playback Controls (Active when a single pickup is selected or Run All is active) */}
         {selectedPickupId !== 'ALL' ? (
-          <div className="flex items-center justify-between gap-1.5 bg-white p-1 rounded-xl border border-slate-200 shadow-2xs">
-            <div className="flex items-center gap-1">
+          <div className="flex flex-wrap items-center justify-between gap-y-1.5 gap-x-1 bg-white p-1 rounded-xl border border-slate-200 shadow-2xs">
+            {/* Step navigation & Play/Pause buttons - strictly single-line */}
+            <div className="flex items-center gap-1 shrink-0 whitespace-nowrap">
               <button
                 type="button"
                 onClick={onResetStep}
-                className="p-1.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors"
+                className="p-1.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors shrink-0"
                 title="Reset to Step 1"
               >
-                <RotateCcw className="w-3.5 h-3.5" />
+                <RotateCcw className="w-3.5 h-3.5 shrink-0" />
               </button>
               <button
                 type="button"
                 onClick={onPrevStep}
                 disabled={currentStepIndex <= 0 || isRunAll}
-                className="p-1.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 disabled:opacity-30 transition-colors"
+                className="p-1.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 disabled:opacity-30 transition-colors shrink-0"
                 title="Previous Step"
               >
-                <SkipBack className="w-3.5 h-3.5" />
+                <SkipBack className="w-3.5 h-3.5 shrink-0" />
               </button>
 
               {/* Single Pickup Play/Pause */}
@@ -204,7 +205,7 @@ export default function InspectorPanel({
                 type="button"
                 onClick={onPlayPause}
                 disabled={isRunAll}
-                className={`px-2.5 py-1.5 rounded-lg font-bold text-xs flex items-center gap-1.5 transition-colors shadow-xs ${
+                className={`px-2.5 py-1.5 rounded-lg font-bold text-xs flex items-center gap-1.5 transition-colors shadow-xs whitespace-nowrap shrink-0 ${
                   isRunAll
                     ? 'opacity-40 bg-slate-100 text-slate-400 cursor-not-allowed'
                     : isPlaying
@@ -213,8 +214,8 @@ export default function InspectorPanel({
                 }`}
                 title="Play Current Pickup"
               >
-                {isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 fill-white" />}
-                <span>{isPlaying ? 'Pause' : 'Play'}</span>
+                {isPlaying ? <Pause className="w-3.5 h-3.5 shrink-0" /> : <Play className="w-3.5 h-3.5 fill-white shrink-0" />}
+                <span className="whitespace-nowrap">{isPlaying ? 'Pause' : 'Play'}</span>
               </button>
 
               {/* Run All Sequential Multi-Pickup Simulation Mode */}
@@ -222,21 +223,21 @@ export default function InspectorPanel({
                 <button
                   type="button"
                   onClick={onStopAll}
-                  className="px-2.5 py-1.5 rounded-lg font-bold text-xs flex items-center gap-1.5 transition-colors shadow-xs bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300"
+                  className="px-2.5 py-1.5 rounded-lg font-bold text-xs flex items-center gap-1.5 transition-colors shadow-xs bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 whitespace-nowrap shrink-0"
                   title="Stop Sequential Simulation"
                 >
-                  <Square className="w-3.5 h-3.5 fill-rose-600 text-rose-600" />
-                  <span>Stop All ({currentRunAllIndex + 1}/{totalPickups})</span>
+                  <Square className="w-3.5 h-3.5 fill-rose-600 text-rose-600 shrink-0" />
+                  <span className="whitespace-nowrap">Stop ({currentRunAllIndex + 1}/{totalPickups})</span>
                 </button>
               ) : (
                 <button
                   type="button"
                   onClick={onRunAll}
-                  className="px-2.5 py-1.5 rounded-lg font-bold text-xs flex items-center gap-1.5 transition-colors shadow-xs bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300"
+                  className="px-2.5 py-1.5 rounded-lg font-bold text-xs flex items-center gap-1.5 transition-colors shadow-xs bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 whitespace-nowrap shrink-0"
                   title="Run All Pickups Sequentially (Wipes Clean Between Pickups)"
                 >
-                  <Play className="w-3.5 h-3.5 fill-emerald-700 text-emerald-700" />
-                  <span>Run All</span>
+                  <Play className="w-3.5 h-3.5 fill-emerald-700 text-emerald-700 shrink-0" />
+                  <span className="whitespace-nowrap">Run All</span>
                 </button>
               )}
 
@@ -244,58 +245,61 @@ export default function InspectorPanel({
                 type="button"
                 onClick={onNextStep}
                 disabled={currentStepIndex >= totalSteps - 1 || isRunAll}
-                className="p-1.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 disabled:opacity-30 transition-colors"
+                className="p-1.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 disabled:opacity-30 transition-colors shrink-0"
                 title="Next Step"
               >
-                <SkipForward className="w-3.5 h-3.5" />
+                <SkipForward className="w-3.5 h-3.5 shrink-0" />
               </button>
             </div>
 
-            <div className="flex items-center gap-1 font-mono text-xs text-slate-600 pr-1">
-              <span className="font-bold text-slate-900">Step {currentStepIndex + 1}</span>
-              <span className="text-slate-400">/ {totalSteps || 1}</span>
-            </div>
+            {/* Step Counter & Speed Pills - strictly single-line */}
+            <div className="flex items-center gap-1.5 shrink-0 whitespace-nowrap">
+              <div className="font-mono text-xs text-slate-600 whitespace-nowrap tabular-nums shrink-0">
+                <span className="font-bold text-slate-900">Step {currentStepIndex + 1}</span>
+                <span className="text-slate-400">/{totalSteps || 1}</span>
+              </div>
 
-            {/* Playback speed pills */}
-            <div className="flex items-center gap-0.5">
-              {[0.5, 1, 2].map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => onSetSpeed(s)}
-                  className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold transition-colors ${
-                    playbackSpeed === s
-                      ? 'bg-slate-900 text-white'
-                      : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
-                  }`}
-                >
-                  {s}×
-                </button>
-              ))}
+              {/* Playback speed pills */}
+              <div className="flex items-center gap-0.5 bg-slate-100 p-0.5 rounded-lg shrink-0">
+                {[0.5, 1, 2].map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => onSetSpeed(s)}
+                    className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold transition-colors whitespace-nowrap ${
+                      playbackSpeed === s
+                        ? 'bg-slate-900 text-white shadow-2xs'
+                        : 'text-slate-500 hover:text-slate-900'
+                    }`}
+                  >
+                    {s}×
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         ) : (
           /* All Summary Playback Bar */
           <div className="flex items-center justify-between gap-1.5 bg-white p-1.5 rounded-xl border border-slate-200 shadow-2xs">
-            <span className="text-xs font-semibold text-slate-600 pl-1">All Pickups Optimization Summary</span>
+            <span className="text-xs font-semibold text-slate-600 pl-1 whitespace-nowrap">All Pickups Optimization Summary</span>
             <button
               type="button"
               onClick={onRunAll}
-              className="px-3 py-1.5 rounded-lg font-bold text-xs flex items-center gap-1.5 transition-colors shadow-xs bg-emerald-600 hover:bg-emerald-700 text-white"
+              className="px-3 py-1.5 rounded-lg font-bold text-xs flex items-center gap-1.5 transition-colors shadow-xs bg-emerald-600 hover:bg-emerald-700 text-white whitespace-nowrap shrink-0"
             >
-              <Play className="w-3.5 h-3.5 fill-white text-white" />
-              <span>Run All Simulation</span>
+              <Play className="w-3.5 h-3.5 fill-white text-white shrink-0" />
+              <span className="whitespace-nowrap">Run All Simulation</span>
             </button>
           </div>
         )}
       </div>
 
       {/* 2. Main Content Area */}
-      <div className="flex-1 overflow-y-auto p-2.5 space-y-2.5">
+      <div className="flex-1 overflow-y-auto p-2 space-y-2">
         {selectedPickupId !== 'ALL' ? (
           <>
             {/* Sleek Compact Pickup Target & Route Bar */}
-            <div className="px-3 py-2 rounded-xl bg-linear-to-r from-emerald-50/90 via-white to-slate-50 border border-emerald-200/90 shadow-2xs flex items-center justify-between text-xs gap-2">
+            <div className="px-2.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-50/90 via-white to-slate-50 border border-emerald-200/90 shadow-2xs flex items-center justify-between text-xs gap-2">
               <div className="flex items-center gap-1.5 min-w-0">
                 <span
                   className="w-2.5 h-2.5 rounded-full shrink-0 shadow-2xs ring-1 ring-white"
@@ -317,9 +321,9 @@ export default function InspectorPanel({
             </div>
 
             {/* Plain-English Live Narrator Banner */}
-            <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/90 shadow-2xs space-y-2">
+            <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200/90 shadow-2xs space-y-1">
               <div className="flex items-center justify-between">
-                <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider border ${phaseBadge.bg}`}>
+                <span className={`px-2 py-0.5 rounded-full text-[9.5px] font-extrabold uppercase tracking-wider border ${phaseBadge.bg}`}>
                   {phaseBadge.label}
                 </span>
                 <span className="text-[10px] font-mono text-slate-500">
@@ -333,9 +337,9 @@ export default function InspectorPanel({
 
             {/* Reroute Detected Callout (when disruption changed active path) */}
             {rerouteNotice && (
-              <div className="p-3 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 space-y-1.5 animate-in fade-in">
+              <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 space-y-1 animate-in fade-in">
                 <div className="flex items-center gap-1.5 font-bold text-xs">
-                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
                   <span>Reroute Detected</span>
                 </div>
                 <p className="text-[11px] leading-relaxed">
@@ -349,25 +353,25 @@ export default function InspectorPanel({
             )}
 
             {/* Light-Theme Algorithm Pseudocode Card */}
-            <div className="p-3 rounded-xl border border-slate-200/90 bg-slate-50 shadow-2xs space-y-1.5 font-mono text-[11.5px]">
-              <div className="flex items-center justify-between pb-1.5 border-b border-slate-200">
-                <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+            <div className="p-2.5 rounded-xl border border-slate-200/90 bg-slate-50 shadow-2xs space-y-1 font-mono text-[11px]">
+              <div className="flex items-center justify-between pb-1 border-b border-slate-200">
+                <span className="text-[10.5px] font-semibold uppercase tracking-wider text-slate-500">
                   ALGORITHM PSEUDOCODE
                 </span>
-                <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full text-[11px] font-medium">
+                <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full text-[10px] font-medium whitespace-nowrap">
                   Line {activeCodeLine || 1} executing
                 </span>
               </div>
-              <div className="space-y-1 pt-0.5">
+              <div className="space-y-0.5 pt-0.5">
                 {PSEUDOCODE_LINES.map(({ line, text }) => {
                   const isExecuting = activeCodeLine === line;
                   return (
                     <div
                       key={line}
-                      className={`pseudocode-line leading-snug transition-colors ${
+                      className={`pseudocode-line leading-tight transition-colors ${
                         isExecuting
-                          ? 'bg-emerald-50 text-emerald-950 font-semibold border-l-[3px] border-emerald-500 px-2.5 py-1.5 rounded-r-lg shadow-2xs'
-                          : 'text-slate-600 px-2.5 py-1.5 rounded-lg hover:bg-slate-100/60'
+                          ? 'bg-emerald-50 text-emerald-950 font-semibold border-l-[3px] border-emerald-500 px-2 py-1 rounded-r-lg shadow-2xs'
+                          : 'text-slate-600 px-2 py-1 rounded-lg hover:bg-slate-100/60'
                       }`}
                       style={{ fontFamily: "'JetBrains Mono', monospace", fontVariantNumeric: 'tabular-nums' }}
                     >
@@ -380,7 +384,7 @@ export default function InspectorPanel({
 
             {/* Live Min-Heap Priority Queue Strip */}
             {currentStep.heap && currentStep.heap.length > 0 && (
-              <div className="p-3 rounded-xl border border-slate-200 bg-white space-y-2 shadow-2xs">
+              <div className="p-2.5 rounded-xl border border-slate-200 bg-white space-y-1.5 shadow-2xs">
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] uppercase font-bold text-slate-500 flex items-center gap-1">
                     <Activity className="w-3.5 h-3.5 text-amber-500" />
@@ -390,18 +394,18 @@ export default function InspectorPanel({
                     Front is Next Pop
                   </span>
                 </div>
-                <div className="flex flex-wrap gap-1.5">
+                <div className="flex flex-wrap gap-1">
                   {currentStep.heap.map((item, idx) => (
                     <div
                       key={idx}
-                      className={`px-2 py-1 rounded text-[10.5px] font-mono flex items-center gap-1.5 border ${
+                      className={`px-1.5 py-0.5 rounded text-[10px] font-mono flex items-center gap-1 border ${
                         idx === 0
-                          ? 'bg-amber-50 border-amber-400 text-amber-900 font-bold ring-2 ring-amber-300/60'
+                          ? 'bg-amber-50 border-amber-400 text-amber-900 font-bold ring-1 ring-amber-300/60'
                           : 'bg-slate-50 border-slate-200 text-slate-700'
                       }`}
                     >
                       {idx === 0 && (
-                        <span className="text-[8px] px-1 rounded bg-amber-500 text-white font-extrabold uppercase">
+                        <span className="text-[7.5px] px-1 rounded bg-amber-500 text-white font-extrabold uppercase">
                           Next
                         </span>
                       )}
@@ -417,7 +421,7 @@ export default function InspectorPanel({
 
             {/* Candidate Evaluation Card during Greedy & Confirmation steps */}
             {currentStep.candidate_checklist && currentStep.candidate_checklist.length > 0 && (
-              <div className="p-3 rounded-xl border border-slate-200 bg-white space-y-2 shadow-2xs">
+              <div className="p-2.5 rounded-xl border border-slate-200 bg-white space-y-1.5 shadow-2xs">
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] uppercase font-bold text-slate-500">
                     Candidate Centres (Dijkstra Ordered)
@@ -425,13 +429,13 @@ export default function InspectorPanel({
                   <span className="text-[10px] text-slate-400">Greedy Eligibility Check</span>
                 </div>
 
-                <div className="space-y-1.5">
+                <div className="space-y-1">
                   {currentStep.candidate_checklist.map((c, i) => {
                     const isAssigned = c.status_badge === 'assigned';
                     return (
                       <div
                         key={i}
-                        className={`p-2.5 rounded-lg border text-xs transition-all ${
+                        className={`p-2 rounded-lg border text-xs transition-all ${
                           isAssigned
                             ? 'border-emerald-500 bg-emerald-50/60'
                             : 'border-slate-200 bg-slate-50/50'

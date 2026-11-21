@@ -31,7 +31,7 @@
   font-size: 11px;
   font-weight: 600;
   color: #1E293B;
-  text-shadow: 0 0 3px #FFFFFF, 0 0 3px #FFFFFF, 1px 1px 0 #FFFFFF, -1px -1px 0 #FFFFFF;
+  text-shadow: 0 0 3px #fff, 0 0 6px #fff, 0 1px 2px #fff;
   line-height: 1.15;
   white-space: nowrap;
   pointer-events: none;
@@ -59,14 +59,16 @@
 .eco-node-marker,
 .eco-edge-pill,
 .eco-cost-chip,
-.eco-status-badge {
+.eco-status-badge,
+.eco-map-legend {
   transition: opacity 320ms ease;
 }
 
 .car-focus-active .eco-node-marker:not([data-focus-keep="true"]),
 .car-focus-active .eco-edge-pill,
 .car-focus-active .eco-cost-chip,
-.car-focus-active .eco-status-badge {
+.car-focus-active .eco-status-badge,
+.car-focus-active .eco-map-legend {
   opacity: 0 !important;
   pointer-events: none !important;
 }
@@ -97,12 +99,24 @@
   z-index: 10;
 }
 
+.eco-node-marker {
+  z-index: 10;
+}
+
+.eco-node-marker[data-focus-keep="true"] {
+  z-index: 20;
+}
+
+.eco-car-marker {
+  z-index: 100 !important;
+}
+
 .vehicle-marker-wrapper {
   position: absolute;
   pointer-events: none !important;
   will-change: transform;
   transition: none !important;
-  z-index: 15;
+  z-index: 100;
 }
 
 .vehicle-marker-wrapper * {
