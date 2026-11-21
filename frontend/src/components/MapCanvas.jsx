@@ -1119,44 +1119,105 @@ export default function MapCanvas({
       });
     }
 
-    // 6. edges-route-drawn-source & layers: edges-route-casing FIRST, then edges-route-drawn on top
+    // 6. Dedicated Always-Visible Route Sources & Layers (edges-route-preview-source & edges-route-drawn-source)
+    if (!targetMap.getSource('edges-route-preview-source')) {
+      targetMap.addSource('edges-route-preview-source', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+      });
+    }
     if (!targetMap.getSource('edges-route-drawn-source')) {
       targetMap.addSource('edges-route-drawn-source', {
         type: 'geojson',
         data: { type: 'FeatureCollection', features: [] },
       });
     }
+
+    const hitBeforeId = targetMap.getLayer('edges-hit') ? 'edges-hit' : undefined;
+
+    // 1. edges-route-casing: crisp white halo ahead and behind
     if (!targetMap.getLayer('edges-route-casing')) {
-      targetMap.addLayer({
-        id: 'edges-route-casing',
-        type: 'line',
-        source: 'edges-route-drawn-source',
-        layout: {
-          'line-cap': 'round',
-          'line-join': 'round',
+      targetMap.addLayer(
+        {
+          id: 'edges-route-casing',
+          type: 'line',
+          source: 'edges-route-preview-source',
+          layout: {
+            'line-cap': 'round',
+            'line-join': 'miter',
+          },
+          paint: {
+            'line-color': '#FFFFFF',
+            'line-width': 7.5,
+            'line-opacity': 0.95,
+          },
         },
-        paint: {
-          'line-color': '#FFFFFF',
-          'line-width': 7.2,
-          'line-opacity': 1.0,
-        },
-      });
+        hitBeforeId
+      );
     }
+
+    // 2. edges-route-preview-base: soft visible mint-emerald
+    if (!targetMap.getLayer('edges-route-preview-base')) {
+      targetMap.addLayer(
+        {
+          id: 'edges-route-preview-base',
+          type: 'line',
+          source: 'edges-route-preview-source',
+          layout: {
+            'line-cap': 'round',
+            'line-join': 'miter',
+          },
+          paint: {
+            'line-color': '#A7F3D0',
+            'line-width': 4.5,
+            'line-opacity': 0.9,
+          },
+        },
+        hitBeforeId
+      );
+    }
+
+    // 3. edges-route-preview-dash: crisp emerald dashed navigation guide track ahead of headlights
+    if (!targetMap.getLayer('edges-route-preview-dash')) {
+      targetMap.addLayer(
+        {
+          id: 'edges-route-preview-dash',
+          type: 'line',
+          source: 'edges-route-preview-source',
+          layout: {
+            'line-cap': 'round',
+            'line-join': 'miter',
+          },
+          paint: {
+            'line-color': '#059669',
+            'line-width': 2.2,
+            'line-dasharray': [2, 2],
+            'line-opacity': 0.75,
+          },
+        },
+        hitBeforeId
+      );
+    }
+
+    // 4. edges-route-drawn: bold solid emerald drawn 0 -> progress directly ON TOP
     if (!targetMap.getLayer('edges-route-drawn')) {
-      targetMap.addLayer({
-        id: 'edges-route-drawn',
-        type: 'line',
-        source: 'edges-route-drawn-source',
-        layout: {
-          'line-cap': 'round',
-          'line-join': 'round',
+      targetMap.addLayer(
+        {
+          id: 'edges-route-drawn',
+          type: 'line',
+          source: 'edges-route-drawn-source',
+          layout: {
+            'line-cap': 'round',
+            'line-join': 'miter',
+          },
+          paint: {
+            'line-color': '#059669',
+            'line-width': 4.8,
+            'line-opacity': 1.0,
+          },
         },
-        paint: {
-          'line-color': '#059669',
-          'line-width': 4.5,
-          'line-opacity': 1.0,
-        },
-      });
+        hitBeforeId
+      );
     }
 
     // 7. edges-hit-source & layer: edges-hit on top for Inspect road clicks
@@ -1197,6 +1258,7 @@ export default function MapCanvas({
       const sptSource = targetMap.getSource('edges-spt-source');
       const rejectedSource = targetMap.getSource('edges-rejected-source');
       const routeDrawnSource = targetMap.getSource('edges-route-drawn-source');
+      const routePreviewSource = targetMap.getSource('edges-route-preview-source');
 
       if (!baseSource || !hitSource) return;
 
@@ -1287,6 +1349,9 @@ export default function MapCanvas({
 
       if (isAllSummary && routeDrawnSource) {
         routeDrawnSource.setData({ type: 'FeatureCollection', features: allSummaryRouteFeatures });
+        if (routePreviewSource) {
+          routePreviewSource.setData({ type: 'FeatureCollection', features: [] });
+        }
       }
     },
     [ensureGraphLayers, step, activePickupId, activePathEdgesSet, previousPathEdgesSet, visitedNodes]
@@ -2226,10 +2291,33 @@ export default function MapCanvas({
     });
 
     if (map.getLayer('edges-route-casing')) {
-      map.setPaintProperty('edges-route-casing', 'line-opacity', 1);
+      map.setPaintProperty('edges-route-casing', 'line-opacity', 0.95);
+    }
+    if (map.getLayer('edges-route-preview-base')) {
+      map.setPaintProperty('edges-route-preview-base', 'line-opacity', 0.9);
+    }
+    if (map.getLayer('edges-route-preview-dash')) {
+      map.setPaintProperty('edges-route-preview-dash', 'line-opacity', 0.75);
     }
     if (map.getLayer('edges-route-drawn')) {
-      map.setPaintProperty('edges-route-drawn', 'line-opacity', 1);
+      map.setPaintProperty('edges-route-drawn', 'line-opacity', 1.0);
+    }
+
+    // Populate preview source with fullRouteCoords so the full optimal path is visible ahead immediately
+    const routePreviewSource = map.getSource('edges-route-preview-source');
+    if (routePreviewSource && fullRouteCoords && fullRouteCoords.length >= 2) {
+      routePreviewSource.setData({
+        type: 'FeatureCollection',
+        features: [
+          {
+            type: 'Feature',
+            geometry: {
+              type: 'LineString',
+              coordinates: fullRouteCoords,
+            },
+          },
+        ],
+      });
     }
 
     // 4. Smooth 2.5D Chase Camera swoop to start node in chase position
@@ -2301,6 +2389,12 @@ export default function MapCanvas({
           }
         });
 
+        // Cleanly clear edges-route-preview-source back to an empty FeatureCollection
+        const routePreviewSource = map.getSource('edges-route-preview-source');
+        if (routePreviewSource) {
+          routePreviewSource.setData({ type: 'FeatureCollection', features: [] });
+        }
+
         // Smoothly restore camera back to pitch: 0, bearing: 0 and fit all nodes
         fitAllNodes(map, duration || 750);
       }
@@ -2348,6 +2442,10 @@ export default function MapCanvas({
 
     const map = mapRef.current;
     if (isMapReady(map)) {
+      const routePreviewSource = map.getSource('edges-route-preview-source');
+      if (routePreviewSource) {
+        routePreviewSource.setData({ type: 'FeatureCollection', features: [] });
+      }
       const routeDrawnSource = map.getSource('edges-route-drawn-source');
       if (routeDrawnSource && activePickupIdRef.current !== 'ALL' && activePickupIdRef.current !== null) {
         routeDrawnSource.setData({ type: 'FeatureCollection', features: [] });
@@ -2503,6 +2601,23 @@ export default function MapCanvas({
             geometry: {
               type: 'LineString',
               coordinates: [fullRouteCoords[0], fullRouteCoords[0]],
+            },
+          },
+        ],
+      });
+    }
+
+    // Ensure edges-route-preview-source exists and is populated with full straight fullRouteCoords
+    const routePreviewSource = map.getSource('edges-route-preview-source');
+    if (routePreviewSource) {
+      routePreviewSource.setData({
+        type: 'FeatureCollection',
+        features: [
+          {
+            type: 'Feature',
+            geometry: {
+              type: 'LineString',
+              coordinates: fullRouteCoords,
             },
           },
         ],
