@@ -24,24 +24,14 @@ import {
   stopAllSounds,
 } from './utils/soundEngine';
 
-export function EcoRouteLeafLogo({ className = 'w-6 h-6' }) {
+export function EcoRouteLeafLogo({ className = 'w-6 h-6', alt = 'EcoRoute' }) {
   return (
-    <svg
-      className={className}
-      viewBox="0 0 28 28"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M12 24C6.5 24 3 19.5 3 14C3 8.5 7.5 4 14 4C14 11 12 17 8 21" />
-      <path d="M7 14C9.5 13 11.5 10 12.5 7.5" />
-      <path d="M6 18C8 17.5 10 16 11.5 14" />
-      <path d="M14 14C17 11 21 10 24 10C24 14.5 20.5 18 16 19" />
-      <path d="M16 14.5C18.5 14.5 21 13 22.5 11.5" />
-    </svg>
+    <img
+      src="/logo-icon.png"
+      alt={alt}
+      className={`${className} object-contain shrink-0 select-none`}
+      draggable={false}
+    />
   );
 }
 
@@ -123,9 +113,9 @@ export default function App() {
         /* Floating transparent white-text header ONLY on / (Overview) route */
         <header className="absolute top-0 left-0 right-0 z-40 w-full px-6 sm:px-12 lg:px-16 py-6 sm:py-8 pointer-events-auto">
           <div className="max-w-7xl mx-auto flex items-center justify-between">
-            {/* Left: EcoRoute white outline leaf/brand icon + EcoRoute (no subtext) */}
-            <Link to="/" className="flex items-center gap-2.5 group">
-              <EcoRouteLeafLogo className="w-6 h-6 sm:w-7 sm:h-7 text-white transition-transform group-hover:scale-105" />
+            {/* Left: EcoRoute brand logo + EcoRoute text */}
+            <Link to="/" className="flex items-center gap-2.5 sm:gap-3 group">
+              <EcoRouteLeafLogo className="w-7 h-7 sm:w-8 sm:h-8 transition-transform group-hover:scale-105" />
               <span className="font-extrabold text-xl sm:text-2xl text-white tracking-tight">EcoRoute</span>
             </Link>
 
@@ -242,8 +232,8 @@ export default function App() {
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
             {/* Brand Logo */}
             <Link to="/" className="flex items-center gap-2.5 group">
-              <div className="w-9 h-9 rounded-xl bg-[#061126] text-white flex items-center justify-center shadow-xs group-hover:scale-105 transition-transform border border-slate-800/40">
-                <EcoRouteLeafLogo className="w-5 h-5 text-white" />
+              <div className="w-9 h-9 rounded-xl bg-emerald-50 border border-emerald-200/80 flex items-center justify-center shadow-2xs group-hover:scale-105 transition-transform">
+                <EcoRouteLeafLogo className="w-6.5 h-6.5" />
               </div>
               <div>
                 <div className="flex items-center gap-1.5">
