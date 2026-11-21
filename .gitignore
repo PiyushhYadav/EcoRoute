@@ -10,6 +10,7 @@ build/
 
 # Python bytecode & environments
 __pycache__/
+*.pyc
 *.py[cod]
 *$py.class
 *.so
@@ -38,7 +39,6 @@ yarn-error.log*
 
 # Scratch directory
 scratch/
-!scratch/build_gallery.py
 
 # Editor & OS files
 .vscode/
