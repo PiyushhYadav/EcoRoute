@@ -2,11 +2,15 @@
 
 **EcoRoute** is a production-ready, full-stack geospatial logistics platform designed to optimize municipal electronic waste (e-waste) collection and routing across urban networks (Delhi NCR pre-seeded network). Powered by **Dijkstra’s Algorithm** (via binary min-heaps) and **Greedy Capacity-Constrained Allocation**, EcoRoute balances road network disruptions (traffic congestion, arterial roadblocks) with specialized material processing certifications and facility volume limits.
 
+## Platform Preview
+
+### 1. Landing & Overview
+
 <img width="1774" height="887" alt="EcoRoute Sunset Dispatch Banner" src="https://github.com/user-attachments/assets/563970e5-b644-408d-a9e9-c83a09410b30" />
 
+### 2. Live Dispatch Simulator (Dijkstra Pathfinding & Disruption Engine)
 
 <img width="1669" height="945" alt="ecoroute-by-piyush onrender com_dispatch (1)" src="https://github.com/user-attachments/assets/744ab3a1-5c1b-401d-b8f5-265559ee286a" />
-
 
 ---
 
