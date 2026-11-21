@@ -5,16 +5,22 @@
  * and Mr. Bean's Mini Cooper vehicle animation (Ignition, Idle Purr, Driving Hum,
  * Deceleration Swoosh, Emerald Arrival Chime, Engine Shut-off).
  * Zero external .mp3/.wav files - instantaneous loading, 100% offline & Render compatible.
+ * 
+ * Upgraded with a master limiter bus (DynamicsCompressorNode) and laptop speaker optimization:
+ * - 2.4x master loudness boost protected by clean limiter to prevent distortion/crackling.
+ * - Harmonic overtones (2x frequency) and raised lowpass filters (500-650 Hz) for clear projection
+ *   on thin laptop and mobile speakers.
  */
 
 const STORAGE_KEY = 'ecoroute_sound_muted';
-const MASTER_VOLUME = 0.22;
+const MASTER_VOLUME = 2.4;
 
 let audioCtx = null;
 let masterGain = null;
+let compressor = null;
 let isMuted = false;
-let activeHum = null; // { osc, filter, gain }
-let activeIdle = null; // { osc1, osc2, filter, gain }
+let activeHum = null; // { osc, oscHarmonic, harmonicGain, filter, gain }
+let activeIdle = null; // { osc1, osc2, oscHarmonic, harmonicGain, filter, gain }
 const muteListeners = new Set();
 
 // Load initial mute state from localStorage (default: false / sound on)
@@ -28,7 +34,8 @@ if (typeof window !== 'undefined') {
 }
 
 /**
- * Lazily initialize or retrieve the shared AudioContext and masterGain
+ * Lazily initialize or retrieve the shared AudioContext, masterGain, and limiter compressor.
+ * Chain: all sound nodes -> masterGain -> compressor (DynamicsCompressorNode) -> ctx.destination
  */
 function getAudioContext() {
   if (typeof window === 'undefined') return null;
@@ -38,9 +45,28 @@ function getAudioContext() {
   if (!audioCtx) {
     try {
       audioCtx = new AudioContextClass();
+
+      // Configure DynamicsCompressorNode as a clean safety limiter
+      compressor = audioCtx.createDynamicsCompressor();
+      compressor.threshold.value = -8;
+      compressor.knee.value = 12;
+      compressor.ratio.value = 8;
+      compressor.attack.value = 0.003;
+      compressor.release.value = 0.15;
+      compressor.threshold.setValueAtTime(-8, audioCtx.currentTime);
+      compressor.knee.setValueAtTime(12, audioCtx.currentTime);
+      compressor.ratio.setValueAtTime(8, audioCtx.currentTime);
+      compressor.attack.setValueAtTime(0.003, audioCtx.currentTime);
+      compressor.release.setValueAtTime(0.15, audioCtx.currentTime);
+
+      // Master gain node (~2.4x loudness boost, 0 when muted)
       masterGain = audioCtx.createGain();
+      masterGain.gain.value = isMuted ? 0 : MASTER_VOLUME;
       masterGain.gain.setValueAtTime(isMuted ? 0 : MASTER_VOLUME, audioCtx.currentTime);
-      masterGain.connect(audioCtx.destination);
+
+      // Signal chain: masterGain -> compressor -> destination
+      masterGain.connect(compressor);
+      compressor.connect(audioCtx.destination);
     } catch (e) {
       console.warn('Web Audio initialization error:', e);
       return null;
@@ -82,7 +108,9 @@ export function setSoundMuted(muted) {
     try {
       const now = audioCtx.currentTime;
       masterGain.gain.cancelScheduledValues(now);
-      masterGain.gain.setValueAtTime(isMuted ? 0 : MASTER_VOLUME, now);
+      masterGain.gain.setValueAtTime(masterGain.gain.value, now);
+      // Clean 12ms micro-ramp to eliminate any clicks or pops when toggling mute
+      masterGain.gain.linearRampToValueAtTime(isMuted ? 0 : MASTER_VOLUME, now + 0.012);
     } catch (e) {}
   }
 
@@ -120,8 +148,9 @@ export function subscribeMute(listener) {
 
 /**
  * 2. playNodeTick():
- * Ultra-subtle, crisp wooden/glass "tick" (~45ms blip sweeping 680Hz -> 520Hz, low gain 0.08)
+ * Crisp wooden/glass "tick" (~48ms blip sweeping 680Hz -> 520Hz, peak gain 0.24)
  * fired when the Dijkstra snake arrowhead reaches a new node.
+ * Balanced slightly softer than arrival chimes so rapid step sequences remain pleasant.
  */
 export function playNodeTick() {
   if (isMuted) return;
@@ -135,32 +164,32 @@ export function playNodeTick() {
 
     osc.type = 'triangle';
     osc.frequency.setValueAtTime(680, now);
-    osc.frequency.exponentialRampToValueAtTime(520, now + 0.045);
+    osc.frequency.exponentialRampToValueAtTime(520, now + 0.048);
 
-    // Rapid micro-attack (2ms) followed by fast exponential decay (45ms)
+    // Rapid micro-attack (3ms) to punchy peak (0.24) followed by fast exponential decay (48ms)
     gain.gain.setValueAtTime(0.001, now);
-    gain.gain.linearRampToValueAtTime(0.08, now + 0.003);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.045);
+    gain.gain.linearRampToValueAtTime(0.24, now + 0.003);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.048);
 
     osc.connect(gain);
     gain.connect(masterGain);
 
     osc.start(now);
-    osc.stop(now + 0.045);
+    osc.stop(now + 0.048);
 
     setTimeout(() => {
       try {
         osc.disconnect();
         gain.disconnect();
       } catch (e) {}
-    }, 60);
+    }, 65);
   } catch (e) {}
 }
 
 /**
  * 3. playCarIgnition():
- * Richer engine start & rev roar (~680ms, dual detuned sawtooth/triangle
- * sweeping through starter rumble into a lively warm throttle rev).
+ * Rich engine start & rev roar (~680ms, dual detuned sawtooth/triangle plus 2x harmonic overtone
+ * sweeping through starter rumble into a lively warm throttle rev, low-pass filter opened to 620Hz).
  */
 export function playCarIgnition() {
   if (isMuted) return;
@@ -173,14 +202,14 @@ export function playCarIgnition() {
 
     const filter = ctx.createBiquadFilter();
     filter.type = 'lowpass';
-    filter.frequency.setValueAtTime(260, now);
-    filter.frequency.linearRampToValueAtTime(520, now + 0.28);
-    filter.frequency.exponentialRampToValueAtTime(240, now + duration);
+    filter.frequency.setValueAtTime(320, now);
+    filter.frequency.linearRampToValueAtTime(620, now + 0.28);
+    filter.frequency.exponentialRampToValueAtTime(300, now + duration);
 
     const gain = ctx.createGain();
     gain.gain.setValueAtTime(0.001, now);
-    gain.gain.linearRampToValueAtTime(0.18, now + 0.08);
-    gain.gain.linearRampToValueAtTime(0.14, now + 0.32);
+    gain.gain.linearRampToValueAtTime(0.32, now + 0.08);
+    gain.gain.linearRampToValueAtTime(0.26, now + 0.32);
     gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
 
     // Dual detuned oscillators for authentic engine roar
@@ -199,6 +228,20 @@ export function playCarIgnition() {
     osc2.frequency.linearRampToValueAtTime(145, now + 0.28);
     osc2.frequency.exponentialRampToValueAtTime(68, now + duration);
 
+    // Subtle 2x harmonic overtone (~35% level) so thin laptop speakers clearly project engine roar
+    const oscHarmonic = ctx.createOscillator();
+    oscHarmonic.type = 'triangle';
+    oscHarmonic.frequency.setValueAtTime(96, now);
+    oscHarmonic.frequency.linearRampToValueAtTime(160, now + 0.12);
+    oscHarmonic.frequency.linearRampToValueAtTime(290, now + 0.28);
+    oscHarmonic.frequency.exponentialRampToValueAtTime(136, now + duration);
+
+    const harmonicGain = ctx.createGain();
+    harmonicGain.gain.setValueAtTime(0.35, now);
+
+    oscHarmonic.connect(harmonicGain);
+    harmonicGain.connect(filter);
+
     osc1.connect(filter);
     osc2.connect(filter);
     filter.connect(gain);
@@ -206,13 +249,17 @@ export function playCarIgnition() {
 
     osc1.start(now);
     osc2.start(now);
+    oscHarmonic.start(now);
     osc1.stop(now + duration);
     osc2.stop(now + duration);
+    oscHarmonic.stop(now + duration);
 
     setTimeout(() => {
       try {
         osc1.disconnect();
         osc2.disconnect();
+        oscHarmonic.disconnect();
+        harmonicGain.disconnect();
         filter.disconnect();
         gain.disconnect();
       } catch (e) {}
@@ -222,8 +269,8 @@ export function playCarIgnition() {
 
 /**
  * 4. startCarIdle():
- * Gentle low idle rumble/purr (detuned oscillators at ~44Hz with lowpass filter at 140Hz,
- * organic 1.5Hz beat frequency, low gain ~0.038) looping during stationary warm-up & cool-down.
+ * Low idle rumble/purr (detuned oscillators at ~44Hz with lowpass filter at 520Hz,
+ * organic 1.5Hz beat frequency, 2x overtone at 88Hz, gain 0.24) looping during stationary warm-up & cool-down.
  */
 export function startCarIdle() {
   stopCarIdle(0.05);
@@ -235,11 +282,11 @@ export function startCarIdle() {
     const now = ctx.currentTime;
     const filter = ctx.createBiquadFilter();
     filter.type = 'lowpass';
-    filter.frequency.setValueAtTime(140, now);
+    filter.frequency.setValueAtTime(520, now);
 
     const gain = ctx.createGain();
     gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.linearRampToValueAtTime(0.038, now + 0.15);
+    gain.gain.linearRampToValueAtTime(0.24, now + 0.15);
 
     const osc1 = ctx.createOscillator();
     osc1.type = 'triangle';
@@ -249,6 +296,17 @@ export function startCarIdle() {
     osc2.type = 'sawtooth';
     osc2.frequency.setValueAtTime(45.5, now);
 
+    // Harmonic overtone at 2x frequency (~88Hz) at ~35% level for laptop speaker audibility
+    const oscHarmonic = ctx.createOscillator();
+    oscHarmonic.type = 'triangle';
+    oscHarmonic.frequency.setValueAtTime(88, now);
+
+    const harmonicGain = ctx.createGain();
+    harmonicGain.gain.setValueAtTime(0.35, now);
+
+    oscHarmonic.connect(harmonicGain);
+    harmonicGain.connect(filter);
+
     osc1.connect(filter);
     osc2.connect(filter);
     filter.connect(gain);
@@ -256,8 +314,9 @@ export function startCarIdle() {
 
     osc1.start(now);
     osc2.start(now);
+    oscHarmonic.start(now);
 
-    activeIdle = { osc1, osc2, filter, gain };
+    activeIdle = { osc1, osc2, oscHarmonic, harmonicGain, filter, gain };
   } catch (e) {
     activeIdle = null;
   }
@@ -265,7 +324,7 @@ export function startCarIdle() {
 
 /**
  * stopCarIdle(fadeTime = 0.1):
- * Fades out engine idle purr cleanly.
+ * Fades out engine idle purr cleanly with zero pops.
  */
 export function stopCarIdle(fadeTime = 0.1) {
   if (!activeIdle) return;
@@ -284,8 +343,11 @@ export function stopCarIdle(fadeTime = 0.1) {
         try {
           idle.osc1.stop();
           idle.osc2.stop();
+          if (idle.oscHarmonic) idle.oscHarmonic.stop();
           idle.osc1.disconnect();
           idle.osc2.disconnect();
+          if (idle.oscHarmonic) idle.oscHarmonic.disconnect();
+          if (idle.harmonicGain) idle.harmonicGain.disconnect();
           idle.filter.disconnect();
           idle.gain.disconnect();
         } catch (e) {}
@@ -294,8 +356,11 @@ export function stopCarIdle(fadeTime = 0.1) {
       try {
         idle.osc1.stop();
         idle.osc2.stop();
+        if (idle.oscHarmonic) idle.oscHarmonic.stop();
         idle.osc1.disconnect();
         idle.osc2.disconnect();
+        if (idle.oscHarmonic) idle.oscHarmonic.disconnect();
+        if (idle.harmonicGain) idle.harmonicGain.disconnect();
       } catch (e) {}
     }
   } catch (e) {}
@@ -303,8 +368,8 @@ export function stopCarIdle(fadeTime = 0.1) {
 
 /**
  * 5. startCarHum(speed = 1):
- * Very soft, continuous low-pass filtered engine driving hum (~75Hz * (0.85 + 0.15 * speed), gain 0.065)
- * fades in smoothly (80ms) while the Mini Cooper is cruising.
+ * Continuous engine driving hum (~75Hz * (0.85 + 0.15 * speed), 2x overtone at 35% level,
+ * lowpass filter at 560Hz, punchy gain 0.24) fades in smoothly while the Mini Cooper is cruising.
  */
 export function startCarHum(speed = 1) {
   stopCarHum(0.02);
@@ -324,18 +389,30 @@ export function startCarHum(speed = 1) {
 
     const filter = ctx.createBiquadFilter();
     filter.type = 'lowpass';
-    filter.frequency.setValueAtTime(220, now);
+    filter.frequency.setValueAtTime(560, now);
 
     const gain = ctx.createGain();
     gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.linearRampToValueAtTime(0.065, now + 0.08);
+    gain.gain.linearRampToValueAtTime(0.24, now + 0.08);
+
+    // Harmonic overtone at 2x frequency at ~35% level for laptop speaker clarity
+    const oscHarmonic = ctx.createOscillator();
+    oscHarmonic.type = 'sawtooth';
+    oscHarmonic.frequency.setValueAtTime(baseFreq * 2, now);
+
+    const harmonicGain = ctx.createGain();
+    harmonicGain.gain.setValueAtTime(0.35, now);
+
+    oscHarmonic.connect(harmonicGain);
+    harmonicGain.connect(filter);
 
     osc.connect(filter);
     filter.connect(gain);
     gain.connect(masterGain);
 
     osc.start(now);
-    activeHum = { osc, filter, gain };
+    oscHarmonic.start(now);
+    activeHum = { osc, oscHarmonic, harmonicGain, filter, gain };
   } catch (e) {
     activeHum = null;
   }
@@ -362,7 +439,10 @@ export function stopCarHum(fadeTime = 0.12) {
       setTimeout(() => {
         try {
           hum.osc.stop();
+          if (hum.oscHarmonic) hum.oscHarmonic.stop();
           hum.osc.disconnect();
+          if (hum.oscHarmonic) hum.oscHarmonic.disconnect();
+          if (hum.harmonicGain) hum.harmonicGain.disconnect();
           hum.filter.disconnect();
           hum.gain.disconnect();
         } catch (e) {}
@@ -370,7 +450,10 @@ export function stopCarHum(fadeTime = 0.12) {
     } else {
       try {
         hum.osc.stop();
+        if (hum.oscHarmonic) hum.oscHarmonic.stop();
         hum.osc.disconnect();
+        if (hum.oscHarmonic) hum.oscHarmonic.disconnect();
+        if (hum.harmonicGain) hum.harmonicGain.disconnect();
       } catch (e) {}
     }
   } catch (e) {}
@@ -378,7 +461,7 @@ export function stopCarHum(fadeTime = 0.12) {
 
 /**
  * 6. playCarBrake():
- * Gentle filtered white-noise deceleration swoosh (~240ms bandpass sweeping 880Hz -> 250Hz).
+ * Filtered white-noise deceleration swoosh (~240ms bandpass sweeping 880Hz -> 250Hz, gain 0.26).
  */
 export function playCarBrake() {
   if (isMuted) return;
@@ -407,7 +490,7 @@ export function playCarBrake() {
 
     const swooshGain = ctx.createGain();
     swooshGain.gain.setValueAtTime(0.001, now);
-    swooshGain.gain.linearRampToValueAtTime(0.055, now + 0.035);
+    swooshGain.gain.linearRampToValueAtTime(0.26, now + 0.035);
     swooshGain.gain.exponentialRampToValueAtTime(0.0001, now + noiseDuration);
 
     whiteNoise.connect(bpf);
@@ -429,7 +512,8 @@ export function playCarBrake() {
 
 /**
  * 7. playArrivalChime():
- * Clean, soft two-note emerald arrival chime (C5: 523.25Hz -> G5: 783.99Hz, sine wave, exponential decay).
+ * Clean, resonant two-note emerald arrival chime (C5: 523.25Hz at 0.34 gain -> G5: 783.99Hz at 0.38 gain,
+ * sine wave, exponential decay). Rings out clearly and joyfully on laptop and phone speakers.
  */
 export function playArrivalChime() {
   if (isMuted) return;
@@ -441,14 +525,14 @@ export function playArrivalChime() {
     const chime1Start = now + 0.02;
     const chime2Start = now + 0.18;
 
-    // Note 1: C5
+    // Note 1: C5 (523.25Hz)
     const oscC5 = ctx.createOscillator();
     const gainC5 = ctx.createGain();
     oscC5.type = 'sine';
     oscC5.frequency.setValueAtTime(523.25, chime1Start);
 
     gainC5.gain.setValueAtTime(0.001, chime1Start);
-    gainC5.gain.linearRampToValueAtTime(0.08, chime1Start + 0.015);
+    gainC5.gain.linearRampToValueAtTime(0.34, chime1Start + 0.015);
     gainC5.gain.exponentialRampToValueAtTime(0.0001, chime1Start + 0.24);
 
     oscC5.connect(gainC5);
@@ -456,14 +540,14 @@ export function playArrivalChime() {
     oscC5.start(chime1Start);
     oscC5.stop(chime1Start + 0.24);
 
-    // Note 2: G5 (bright, joyful arrival ring)
+    // Note 2: G5 (783.99Hz, bright, joyful arrival ring)
     const oscG5 = ctx.createOscillator();
     const gainG5 = ctx.createGain();
     oscG5.type = 'sine';
     oscG5.frequency.setValueAtTime(783.99, chime2Start);
 
     gainG5.gain.setValueAtTime(0.001, chime2Start);
-    gainG5.gain.linearRampToValueAtTime(0.09, chime2Start + 0.015);
+    gainG5.gain.linearRampToValueAtTime(0.38, chime2Start + 0.015);
     gainG5.gain.exponentialRampToValueAtTime(0.0001, chime2Start + 0.38);
 
     oscG5.connect(gainG5);
@@ -493,8 +577,8 @@ export function playCarBrakeAndArrive() {
 
 /**
  * 9. playEngineStop():
- * Subtle engine shut-off: short drop in pitch (65Hz down to 22Hz over 350ms with filter closing)
- * followed by a delicate mechanical relay switch click.
+ * Engine shut-off: pitch drop (65Hz down to 22Hz over 350ms with 2x harmonic overtone and 550Hz filter)
+ * followed by a crisp mechanical relay switch click (gain 0.24).
  */
 export function playEngineStop() {
   if (isMuted) return;
@@ -511,23 +595,36 @@ export function playEngineStop() {
     osc.frequency.setValueAtTime(65, now);
     osc.frequency.exponentialRampToValueAtTime(22, now + duration);
 
+    // Harmonic overtone at 2x frequency (~130Hz -> 44Hz) at ~35% level
+    const oscHarmonic = ctx.createOscillator();
+    oscHarmonic.type = 'triangle';
+    oscHarmonic.frequency.setValueAtTime(130, now);
+    oscHarmonic.frequency.exponentialRampToValueAtTime(44, now + duration);
+
+    const harmonicGain = ctx.createGain();
+    harmonicGain.gain.setValueAtTime(0.35, now);
+
     const filter = ctx.createBiquadFilter();
     filter.type = 'lowpass';
-    filter.frequency.setValueAtTime(180, now);
-    filter.frequency.exponentialRampToValueAtTime(40, now + duration);
+    filter.frequency.setValueAtTime(550, now);
+    filter.frequency.exponentialRampToValueAtTime(120, now + duration);
 
     const gain = ctx.createGain();
-    gain.gain.setValueAtTime(0.035, now);
+    gain.gain.setValueAtTime(0.26, now);
     gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
 
+    oscHarmonic.connect(harmonicGain);
+    harmonicGain.connect(filter);
     osc.connect(filter);
     filter.connect(gain);
     gain.connect(masterGain);
 
     osc.start(now);
+    oscHarmonic.start(now);
     osc.stop(now + duration);
+    oscHarmonic.stop(now + duration);
 
-    // Subtle relay / key switch click at the end
+    // Mechanical relay switch click at the end (gain 0.24)
     const clickStart = now + 0.32;
     const clickOsc = ctx.createOscillator();
     clickOsc.type = 'triangle';
@@ -536,7 +633,7 @@ export function playEngineStop() {
 
     const clickGain = ctx.createGain();
     clickGain.gain.setValueAtTime(0.001, clickStart);
-    clickGain.gain.linearRampToValueAtTime(0.04, clickStart + 0.002);
+    clickGain.gain.linearRampToValueAtTime(0.24, clickStart + 0.002);
     clickGain.gain.exponentialRampToValueAtTime(0.0001, clickStart + 0.018);
 
     clickOsc.connect(clickGain);
@@ -548,6 +645,8 @@ export function playEngineStop() {
     setTimeout(() => {
       try {
         osc.disconnect();
+        oscHarmonic.disconnect();
+        harmonicGain.disconnect();
         filter.disconnect();
         gain.disconnect();
         clickOsc.disconnect();
@@ -559,17 +658,122 @@ export function playEngineStop() {
 
 /**
  * 10. stopAllSounds():
- * Immediately stops any active hum and idle purr, and cancels scheduled gain values whenever
- * Pause, Reset, Stop All, tab switch, or page unmount occurs.
+ * Immediately stops any active hum and idle purr, and smoothly ramps master gain to target
+ * whenever Pause, Reset, Stop All, tab switch, or page unmount occurs. Zero clicks or pops.
  */
 export function stopAllSounds() {
-  stopCarHum(0.01);
-  stopCarIdle(0.01);
+  stopCarHum(0.02);
+  stopCarIdle(0.02);
   if (masterGain && audioCtx) {
     try {
       const now = audioCtx.currentTime;
+      const targetGain = isMuted ? 0 : MASTER_VOLUME;
       masterGain.gain.cancelScheduledValues(now);
-      masterGain.gain.setValueAtTime(isMuted ? 0 : MASTER_VOLUME, now);
+      masterGain.gain.setValueAtTime(masterGain.gain.value, now);
+      masterGain.gain.linearRampToValueAtTime(targetGain, now + 0.012);
     } catch (e) {}
   }
 }
+
+/**
+ * 11. playUiClick():
+ * Crisp, modern UI click / toggle sound effect (gain 0.24).
+ */
+export function playUiClick() {
+  if (isMuted) return;
+  const ctx = getAudioContext();
+  if (!ctx || ctx.state !== 'running') return;
+
+  try {
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(950, now);
+    osc.frequency.exponentialRampToValueAtTime(450, now + 0.025);
+
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.linearRampToValueAtTime(0.24, now + 0.002);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.025);
+
+    osc.connect(gain);
+    gain.connect(masterGain);
+
+    osc.start(now);
+    osc.stop(now + 0.025);
+
+    setTimeout(() => {
+      try {
+        osc.disconnect();
+        gain.disconnect();
+      } catch (e) {}
+    }, 50);
+  } catch (e) {}
+}
+
+/**
+ * 12. playErrorTone():
+ * Clear, gentle two-tone rejection/error buzz (gain 0.25).
+ */
+export function playErrorTone() {
+  if (isMuted) return;
+  const ctx = getAudioContext();
+  if (!ctx || ctx.state !== 'running') return;
+
+  try {
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(220, now);
+    osc.frequency.setValueAtTime(180, now + 0.07);
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(600, now);
+
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.linearRampToValueAtTime(0.25, now + 0.005);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(masterGain);
+
+    osc.start(now);
+    osc.stop(now + 0.16);
+
+    setTimeout(() => {
+      try {
+        osc.disconnect();
+        filter.disconnect();
+        gain.disconnect();
+      } catch (e) {}
+    }, 220);
+  } catch (e) {}
+}
+
+const soundEngine = {
+  unlockAudio,
+  isSoundMuted,
+  setSoundMuted,
+  toggleMute,
+  subscribeMute,
+  playNodeTick,
+  playCarIgnition,
+  startCarIdle,
+  stopCarIdle,
+  startCarHum,
+  stopCarHum,
+  playCarBrake,
+  playArrivalChime,
+  playCarBrakeAndArrive,
+  playEngineStop,
+  stopAllSounds,
+  playUiClick,
+  playErrorTone,
+};
+
+export default soundEngine;
